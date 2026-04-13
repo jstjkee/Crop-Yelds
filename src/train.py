@@ -5,14 +5,21 @@ import pandas as pd
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import LinearRegression
 from sklearn.model_selection import train_test_split
+from sklearn.neighbors import KNeighborsRegressor
 from sklearn.pipeline import Pipeline
+from sklearn.svm import SVR
 
 from src.config import MODELS_DIR, RANDOM_STATE, TEST_SIZE
-from src.preprocessing import build_preprocessor, detect_feature_types
+from src.preprocessing import (
+    build_preprocessor,
+    cast_bool_to_int,
+    detect_feature_types,
+    maybe_add_pca,
+)
 
 
-def get_models() -> Dict[str, object]:
-    return {
+def get_models(selected_models: list[str]) -> Dict[str, object]:
+    all_models = {
         "Linear Regression": LinearRegression(),
         "Random Forest": RandomForestRegressor(
             n_estimators=100,
@@ -21,7 +28,11 @@ def get_models() -> Dict[str, object]:
             max_depth=12,
             min_samples_leaf=5,
         ),
+        "KNN Regressor": KNeighborsRegressor(n_neighbors=30, weights="distance"),
+        "SVR": SVR(C=1.0, epsilon=0.1, kernel="rbf"),
     }
+
+    return {name: model for name, model in all_models.items() if name in selected_models}
 
 
 def prepare_data(df: pd.DataFrame, target_col: str):
@@ -36,24 +47,42 @@ def prepare_data(df: pd.DataFrame, target_col: str):
     )
 
 
-def train_all_models(df: pd.DataFrame, target_col: str) -> Tuple[dict, pd.DataFrame, pd.Series, pd.DataFrame, pd.Series]:
-    if len(df) > 50000:
-        df = df.sample(n=50000, random_state=RANDOM_STATE)
+def train_all_models(
+    df: pd.DataFrame,
+    target_col: str,
+    selected_models: list[str],
+    use_pca: bool = False,
+    pca_components: int = 7,
+    sample_size: int | None = None,
+) -> Tuple[dict, pd.DataFrame, pd.Series, pd.DataFrame, pd.Series]:
+    if sample_size is not None and len(df) > sample_size:
+        df = df.sample(n=sample_size, random_state=RANDOM_STATE).reset_index(drop=True)
+
+    numeric_features, categorical_features, bool_features = detect_feature_types(df, target_col)
+
+    # ВАЖНО: bool -> int
+    df = cast_bool_to_int(df, bool_features)
 
     X_train, X_test, y_train, y_test = prepare_data(df, target_col)
 
-    numeric_features, categorical_features = detect_feature_types(df, target_col)
-    preprocessor = build_preprocessor(numeric_features, categorical_features)
+    preprocessor = build_preprocessor(numeric_features, categorical_features, bool_features)
 
     trained_models = {}
 
-    for model_name, model in get_models().items():
+    for model_name, model in get_models(selected_models).items():
+        transform_pipeline = maybe_add_pca(
+            preprocessor=preprocessor,
+            use_pca=use_pca,
+            n_components=pca_components,
+        )
+
         pipeline = Pipeline(
             steps=[
-                ("preprocessor", preprocessor),
+                *transform_pipeline.steps,
                 ("model", model),
             ]
         )
+
         pipeline.fit(X_train, y_train)
         trained_models[model_name] = pipeline
 
