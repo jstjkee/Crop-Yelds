@@ -12,7 +12,6 @@ from src.evaluate import evaluate_all_models
 from src.train import save_model, train_all_models
 from src.visualize import dataframe_to_csv_bytes, plot_actual_vs_predicted, plot_target_distribution
 
-
 st.set_page_config(page_title="Crop Yield Forecast", layout="wide")
 
 st.title("Прогнозирование урожайности")
@@ -23,6 +22,9 @@ uploaded_file = st.file_uploader("Загрузи CSV-файл", type=["csv"])
 if uploaded_file is not None:
     try:
         df = load_csv(uploaded_file)
+
+        st.subheader("Типы данных")
+        st.write(df.dtypes.astype(str))
 
         st.subheader("Предпросмотр данных")
         st.dataframe(df.head())

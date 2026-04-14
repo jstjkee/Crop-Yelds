@@ -3,7 +3,6 @@ from typing import Dict, Tuple
 import pandas as pd
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
-
 def _calc_metrics(y_true, y_pred) -> dict:
     return {
         "MAE": float(mean_absolute_error(y_true, y_pred)),
@@ -11,11 +10,7 @@ def _calc_metrics(y_true, y_pred) -> dict:
         "R2": float(r2_score(y_true, y_pred)),
     }
 
-
 def evaluate_model(model, X_train, y_train, X_test, y_test) -> Tuple[dict, pd.Series, pd.Series]:
-    """
-    Считает train/test метрики одной модели.
-    """
     y_pred_train = model.predict(X_train)
     y_pred_test = model.predict(X_test)
 
@@ -37,11 +32,7 @@ def evaluate_model(model, X_train, y_train, X_test, y_test) -> Tuple[dict, pd.Se
         pd.Series(y_pred_test, index=y_test.index, name="test_prediction"),
     )
 
-
 def evaluate_all_models(models: Dict[str, object], X_train, y_train, X_test, y_test):
-    """
-    Возвращает таблицу train/test метрик и предсказания.
-    """
     rows = []
     predictions = {}
 

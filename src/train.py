@@ -12,11 +12,10 @@ from sklearn.svm import SVR
 from src.config import MODELS_DIR, RANDOM_STATE, TEST_SIZE
 from src.preprocessing import (
     build_preprocessor,
-    cast_bool_to_int,
     detect_feature_types,
     maybe_add_pca,
+    sanitize_dataframe,
 )
-
 
 def get_models(selected_models: list[str]) -> Dict[str, object]:
     all_models = {
@@ -34,7 +33,6 @@ def get_models(selected_models: list[str]) -> Dict[str, object]:
 
     return {name: model for name, model in all_models.items() if name in selected_models}
 
-
 def prepare_data(df: pd.DataFrame, target_col: str):
     X = df.drop(columns=[target_col])
     y = df[target_col]
@@ -45,7 +43,6 @@ def prepare_data(df: pd.DataFrame, target_col: str):
         test_size=TEST_SIZE,
         random_state=RANDOM_STATE,
     )
-
 
 def train_all_models(
     df: pd.DataFrame,
@@ -58,14 +55,16 @@ def train_all_models(
     if sample_size is not None and len(df) > sample_size:
         df = df.sample(n=sample_size, random_state=RANDOM_STATE).reset_index(drop=True)
 
-    numeric_features, categorical_features, bool_features = detect_feature_types(df, target_col)
+    df = sanitize_dataframe(df)
 
-    # ВАЖНО: bool -> int
-    df = cast_bool_to_int(df, bool_features)
+    numeric_features, categorical_features = detect_feature_types(df, target_col)
 
     X_train, X_test, y_train, y_test = prepare_data(df, target_col)
 
-    preprocessor = build_preprocessor(numeric_features, categorical_features, bool_features)
+    preprocessor = build_preprocessor(
+        numeric_features=numeric_features,
+        categorical_features=categorical_features,
+    )
 
     trained_models = {}
 
@@ -87,7 +86,6 @@ def train_all_models(
         trained_models[model_name] = pipeline
 
     return trained_models, X_train, y_train, X_test, y_test
-
 
 def save_model(model, model_name: str) -> str:
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
