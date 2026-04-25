@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import Dict, Tuple
 
 import joblib
@@ -12,8 +14,8 @@ from sklearn.svm import SVR
 from src.config import MODELS_DIR, RANDOM_STATE, TEST_SIZE
 from src.preprocessing import (
     build_preprocessor,
+    build_transform_pipeline,
     detect_feature_types,
-    maybe_add_pca,
     sanitize_dataframe,
 )
 
@@ -27,8 +29,15 @@ def get_models(selected_models: list[str]) -> Dict[str, object]:
             max_depth=12,
             min_samples_leaf=5,
         ),
-        "KNN Regressor": KNeighborsRegressor(n_neighbors=30, weights="distance"),
-        "SVR": SVR(C=1.0, epsilon=0.1, kernel="rbf"),
+        "KNN Regressor": KNeighborsRegressor(
+            n_neighbors=30,
+            weights="distance",
+        ),
+        "SVR": SVR(
+            C=1.0,
+            epsilon=0.1,
+            kernel="rbf",
+        ),
     }
 
     return {name: model for name, model in all_models.items() if name in selected_models}
@@ -52,40 +61,40 @@ def train_all_models(
     pca_components: int = 7,
     sample_size: int | None = None,
 ) -> Tuple[dict, pd.DataFrame, pd.Series, pd.DataFrame, pd.Series]:
-    if sample_size is not None and len(df) > sample_size:
-        df = df.sample(n=sample_size, random_state=RANDOM_STATE).reset_index(drop=True)
+    result = df.copy()
 
-    df = sanitize_dataframe(df)
+    if sample_size is not None and len(result) > sample_size:
+        result = result.sample(n=sample_size, random_state=RANDOM_STATE).reset_index(drop=True)
 
-    numeric_features, categorical_features = detect_feature_types(df, target_col)
+    result = sanitize_dataframe(result)
 
-    X_train, X_test, y_train, y_test = prepare_data(df, target_col)
+    numeric_features, categorical_features = detect_feature_types(result, target_col)
+
+    X_train, X_test, y_train, y_test = prepare_data(result, target_col)
 
     preprocessor = build_preprocessor(
         numeric_features=numeric_features,
         categorical_features=categorical_features,
     )
-
     trained_models = {}
 
     for model_name, model in get_models(selected_models).items():
-        transform_pipeline = maybe_add_pca(
+        transform_pipeline = build_transform_pipeline(
             preprocessor=preprocessor,
             use_pca=use_pca,
-            n_components=pca_components,
+            pca_components=pca_components,
         )
-
         pipeline = Pipeline(
             steps=[
                 *transform_pipeline.steps,
                 ("model", model),
             ]
         )
-
         pipeline.fit(X_train, y_train)
         trained_models[model_name] = pipeline
 
     return trained_models, X_train, y_train, X_test, y_test
+
 
 def save_model(model, model_name: str) -> str:
     MODELS_DIR.mkdir(parents=True, exist_ok=True)

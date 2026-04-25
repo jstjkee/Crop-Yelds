@@ -1,7 +1,10 @@
+from __future__ import annotations
+
 from typing import Dict, Tuple
 
 import pandas as pd
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+
 
 def _calc_metrics(y_true, y_pred) -> dict:
     return {
@@ -37,19 +40,28 @@ def evaluate_all_models(models: Dict[str, object], X_train, y_train, X_test, y_t
     predictions = {}
 
     for model_name, model in models.items():
-        metrics, y_pred_train, y_pred_test = evaluate_model(model, X_train, y_train, X_test, y_test)
-
+        metrics, y_pred_train, y_pred_test = evaluate_model(
+            model=model,
+            X_train=X_train,
+            y_train=y_train,
+            X_test=X_test,
+            y_test=y_test,
+        )
         rows.append(
             {
                 "Model": model_name,
                 **metrics,
             }
         )
-
         predictions[model_name] = {
             "train": y_pred_train,
             "test": y_pred_test,
         }
 
-    results_df = pd.DataFrame(rows).sort_values(by="Test R2", ascending=False).reset_index(drop=True)
+    results_df = (
+        pd.DataFrame(rows)
+        .sort_values(by="Test R2", ascending=False)
+        .reset_index(drop=True)
+    )
+
     return results_df, predictions
