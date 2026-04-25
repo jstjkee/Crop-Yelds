@@ -44,5 +44,25 @@ def plot_boxplots(df: pd.DataFrame, columns: list[str]):
     ax.tick_params(axis="x", rotation=45)
     return fig
 
+def plot_feature_importance(feature_importance_df: pd.DataFrame, top_n: int = 20):
+    top_df = feature_importance_df.sort_values("importance", ascending=False).head(top_n)
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    sns.barplot(data=top_df, x="importance", y="feature", ax=ax)
+    ax.set_title(f"Top-{top_n} feature importance")
+    ax.set_xlabel("Importance")
+    ax.set_ylabel("Feature")
+    return fig
+
+def plot_linear_coefficients(coefficients_df: pd.DataFrame, top_n: int = 20):
+    top_df = coefficients_df.sort_values("abs_coefficient", ascending=False).head(top_n)
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    sns.barplot(data=top_df, x="coefficient", y="feature", ax=ax)
+    ax.set_title(f"Top-{top_n} linear coefficients")
+    ax.set_xlabel("Coefficient")
+    ax.set_ylabel("Feature")
+    return fig
+
 def dataframe_to_csv_bytes(df: pd.DataFrame) -> bytes:
     return df.to_csv(index=False).encode("utf-8")
