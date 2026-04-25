@@ -1,10 +1,14 @@
 from __future__ import annotations
 
-from typing import Dict, Tuple
+from typing import Dict
 
 import joblib
 import pandas as pd
-from sklearn.ensemble import RandomForestRegressor
+from sklearn.ensemble import (
+    ExtraTreesRegressor,
+    HistGradientBoostingRegressor,
+    RandomForestRegressor,
+)
 from sklearn.linear_model import LinearRegression
 from sklearn.model_selection import train_test_split
 from sklearn.neighbors import KNeighborsRegressor
@@ -28,6 +32,19 @@ def get_models(selected_models: list[str]) -> Dict[str, object]:
             n_jobs=-1,
             max_depth=12,
             min_samples_leaf=5,
+        ),
+        "Extra Trees": ExtraTreesRegressor(
+            n_estimators=150,
+            random_state=RANDOM_STATE,
+            n_jobs=-1,
+            max_depth=14,
+            min_samples_leaf=3,
+        ),
+        "HistGradientBoosting": HistGradientBoostingRegressor(
+            random_state=RANDOM_STATE,
+            max_depth=10,
+            learning_rate=0.08,
+            max_iter=200,
         ),
         "KNN Regressor": KNeighborsRegressor(
             n_neighbors=30,
@@ -60,7 +77,7 @@ def train_all_models(
     use_pca: bool = False,
     pca_components: int = 7,
     sample_size: int | None = None,
-) -> Tuple[dict, pd.DataFrame, pd.Series, pd.DataFrame, pd.Series]:
+):
     result = df.copy()
 
     if sample_size is not None and len(result) > sample_size:
@@ -76,6 +93,7 @@ def train_all_models(
         numeric_features=numeric_features,
         categorical_features=categorical_features,
     )
+
     trained_models = {}
 
     for model_name, model in get_models(selected_models).items():
@@ -84,17 +102,18 @@ def train_all_models(
             use_pca=use_pca,
             pca_components=pca_components,
         )
+
         pipeline = Pipeline(
             steps=[
                 *transform_pipeline.steps,
                 ("model", model),
             ]
         )
+
         pipeline.fit(X_train, y_train)
         trained_models[model_name] = pipeline
 
     return trained_models, X_train, y_train, X_test, y_test
-
 
 def save_model(model, model_name: str) -> str:
     MODELS_DIR.mkdir(parents=True, exist_ok=True)

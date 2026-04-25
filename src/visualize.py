@@ -1,6 +1,6 @@
 from __future__ import annotations
-import matplotlib.pyplot as plt
 import pandas as pd
+import matplotlib.pyplot as plt
 import seaborn as sns
 
 def plot_target_distribution(df: pd.DataFrame, target_col: str):
@@ -66,3 +66,14 @@ def plot_linear_coefficients(coefficients_df: pd.DataFrame, top_n: int = 20):
 
 def dataframe_to_csv_bytes(df: pd.DataFrame) -> bytes:
     return df.to_csv(index=False).encode("utf-8")
+
+def build_predictions_dataframe(y_true: pd.Series, y_pred: pd.Series) -> pd.DataFrame:
+    result = pd.DataFrame(
+        {
+            "actual": y_true.reset_index(drop=True),
+            "predicted": y_pred.reset_index(drop=True),
+        }
+    )
+    result["residual"] = result["actual"] - result["predicted"]
+    result["absolute_error"] = result["residual"].abs()
+    return result

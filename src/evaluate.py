@@ -1,7 +1,5 @@
 from __future__ import annotations
-
 from typing import Dict, Tuple
-
 import pandas as pd
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
@@ -35,7 +33,7 @@ def evaluate_model(model, X_train, y_train, X_test, y_test) -> Tuple[dict, pd.Se
         pd.Series(y_pred_test, index=y_test.index, name="test_prediction"),
     )
 
-def evaluate_all_models(models: Dict[str, object], X_train, y_train, X_test, y_test):
+def evaluate_all_models(models: Dict[str, object], X_train, y_train, X_test, y_test, mode_name: str):
     rows = []
     predictions = {}
 
@@ -47,13 +45,16 @@ def evaluate_all_models(models: Dict[str, object], X_train, y_train, X_test, y_t
             X_test=X_test,
             y_test=y_test,
         )
+
         rows.append(
             {
+                "Mode": mode_name,
                 "Model": model_name,
                 **metrics,
             }
         )
-        predictions[model_name] = {
+
+        predictions[(mode_name, model_name)] = {
             "train": y_pred_train,
             "test": y_pred_test,
         }

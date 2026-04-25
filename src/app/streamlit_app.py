@@ -1,8 +1,7 @@
 from __future__ import annotations
-
 import sys
 from pathlib import Path
-
+import pandas as pd
 import streamlit as st
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -18,6 +17,7 @@ from src.explain import (
 )
 from src.train import save_model, train_all_models
 from src.visualize import (
+    build_predictions_dataframe,
     dataframe_to_csv_bytes,
     plot_actual_vs_predicted,
     plot_boxplots,
@@ -57,8 +57,16 @@ else:
 
             selected_models = st.multiselect(
                 "Модели",
-                options=["Linear Regression", "Random Forest", "KNN Regressor", "SVR"],
-                default=["Linear Regression", "Random Forest"],
+                options=["Linear Regression",
+                         "Random Forest",
+                         "Extra Trees",
+                         "HistGradientBoosting",
+                         "KNN Regressor",
+                         "SVR"],
+                default=["Linear Regression",
+                         "Random Forest",
+                         "Extra Trees",
+                         "HistGradientBoosting"],
             )
 
             sample_size = st.selectbox(
@@ -67,7 +75,7 @@ else:
                 index=1,
                 format_func=lambda x: "Весь датасет" if x is None else str(x),
             )
-
+            compare_pca_modes = st.checkbox("Сравнить PCA и без PCA", value=True)
             use_pca = st.checkbox("Использовать PCA", value=False)
 
             pca_components = 7
@@ -128,7 +136,7 @@ else:
             st.markdown("### Текущая конфигурация")
             c1, c2, c3 = st.columns(3)
             c1.write(f"**Target:** {target_col}")
-            c2.write(f"**PCA:** {'Да' if use_pca else 'Нет'}")
+            c2.write(f"**Сравнение PCA:** {'Да' if compare_pca_modes else 'Нет'}")
             c3.write(f"**Размер выборки:** {'Весь датасет' if sample_size is None else sample_size}")
 
             st.write(f"**Модели:** {', '.join(selected_models) if selected_models else 'не выбраны'}")
@@ -138,79 +146,140 @@ else:
                     st.error("Выбери хотя бы одну модель.")
                 else:
                     with st.spinner("Обучение моделей..."):
-                        models, X_train, y_train, X_test, y_test = train_all_models(
-                            df=df,
-                            target_col=target_col,
-                            selected_models=selected_models,
-                            use_pca=use_pca,
-                            pca_components=pca_components,
-                            sample_size=sample_size,
-                        )
+                        all_results = []
+                        all_predictions = {}
+                        all_models_store = {}
 
-                        results_df, predictions = evaluate_all_models(
-                            models=models,
-                            X_train=X_train,
-                            y_train=y_train,
-                            X_test=X_test,
-                            y_test=y_test,
-                        )
+                        experiment_modes = []
+                        if compare_pca_modes:
+                            experiment_modes = [
+                                ("No PCA", False),
+                                ("With PCA", True),
+                            ]
+                        else:
+                            experiment_modes = [
+                                ("With PCA" if use_pca else "No PCA", use_pca),
+                            ]
 
-                    st.session_state["models"] = models
-                    st.session_state["X_train"] = X_train
-                    st.session_state["y_train"] = y_train
-                    st.session_state["X_test"] = X_test
-                    st.session_state["y_test"] = y_test
-                    st.session_state["results_df"] = results_df
-                    st.session_state["predictions"] = predictions
+                        shared_data = None
+
+                        for mode_name, current_use_pca in experiment_modes:
+                            models, X_train, y_train, X_test, y_test = train_all_models(
+                                df=df,
+                                target_col=target_col,
+                                selected_models=selected_models,
+                                use_pca=current_use_pca,
+                                pca_components=pca_components,
+                                sample_size=sample_size,
+                            )
+
+                            results_df_mode, predictions_mode = evaluate_all_models(
+                                models=models,
+                                X_train=X_train,
+                                y_train=y_train,
+                                X_test=X_test,
+                                y_test=y_test,
+                                mode_name=mode_name,
+                            )
+
+                            all_results.append(results_df_mode)
+                            all_predictions.update(predictions_mode)
+
+                            for model_name, model in models.items():
+                                all_models_store[(mode_name, model_name)] = model
+
+                            if shared_data is None:
+                                shared_data = {
+                                    "X_train": X_train,
+                                    "y_train": y_train,
+                                    "X_test": X_test,
+                                    "y_test": y_test,
+                                }
+
+                        final_results_df = pd.concat(all_results, ignore_index=True)
+                        final_results_df = final_results_df.sort_values(by="Test R2", ascending=False).reset_index(
+                            drop=True)
+
+                    st.session_state["models"] = all_models_store
+                    st.session_state["X_train"] = shared_data["X_train"]
+                    st.session_state["y_train"] = shared_data["y_train"]
+                    st.session_state["X_test"] = shared_data["X_test"]
+                    st.session_state["y_test"] = shared_data["y_test"]
+                    st.session_state["results_df"] = final_results_df
+                    st.session_state["predictions"] = all_predictions
                     st.session_state["target_col"] = target_col
 
                     st.success("Обучение завершено")
 
             if "results_df" in st.session_state:
                 results_df = st.session_state["results_df"]
-                models = st.session_state["models"]
+                models_store = st.session_state["models"]
                 y_test = st.session_state["y_test"]
                 predictions = st.session_state["predictions"]
 
                 if not results_df.empty:
-                    best_model_name = results_df.iloc[0]["Model"]
-                    best_model = models[best_model_name]
                     best_row = results_df.iloc[0]
-                    best_pred_test = predictions[best_model_name]["test"]
+                    best_mode = best_row["Mode"]
+                    best_model_name = best_row["Model"]
+                    best_model = models_store[(best_mode, best_model_name)]
+                    best_pred_test = predictions[(best_mode, best_model_name)]["test"]
 
-                    st.markdown("### Лучшая модель")
+                    st.markdown("### Лучшая конфигурация")
 
                     s1, s2, s3, s4 = st.columns(4)
-                    s1.metric("Модель", best_model_name)
-                    s2.metric("Test R²", f"{best_row['Test R2']:.4f}")
-                    s3.metric("Test MAE", f"{best_row['Test MAE']:.4f}")
-                    s4.metric("Test MSE", f"{best_row['Test MSE']:.4f}")
+                    s1.metric("Режим", best_mode)
+                    s2.metric("Модель", best_model_name)
+                    s3.metric("Test R²", f"{best_row['Test R2']:.4f}")
+                    s4.metric("Test MAE", f"{best_row['Test MAE']:.4f}")
+
+                    st.info(
+                        f"На текущем запуске лучшей конфигурацией стала **{best_model_name}** "
+                        f"в режиме **{best_mode}**. "
+                        f"Она показала Test R² = **{best_row['Test R2']:.4f}**, "
+                        f"Test MAE = **{best_row['Test MAE']:.4f}** и "
+                        f"Test MSE = **{best_row['Test MSE']:.4f}**."
+                    )
 
                     st.subheader("Таблица результатов")
                     st.dataframe(results_df, width="stretch")
 
-                    csv_bytes = dataframe_to_csv_bytes(results_df)
+                    metrics_csv = dataframe_to_csv_bytes(results_df)
                     st.download_button(
                         label="Скачать метрики в CSV",
-                        data=csv_bytes,
-                        file_name="model_metrics.csv",
+                        data=metrics_csv,
+                        file_name="model_metrics_comparison.csv",
                         mime="text/csv",
                     )
 
-                    st.subheader(f"График: {best_model_name}")
+                    predictions_df = build_predictions_dataframe(
+                        y_true=y_test,
+                        y_pred=best_pred_test,
+                    )
+
+                    st.subheader(f"График: {best_model_name} ({best_mode})")
                     fig = plot_actual_vs_predicted(
                         y_true=y_test.reset_index(drop=True),
                         y_pred=best_pred_test.reset_index(drop=True),
-                        title=f"Actual vs Predicted — {best_model_name}",
+                        title=f"Actual vs Predicted — {best_model_name} ({best_mode})",
                     )
                     st.pyplot(fig, width="content")
 
+                    st.subheader("Предсказания лучшей конфигурации")
+                    st.dataframe(predictions_df.head(50), width="stretch")
+
+                    predictions_csv = dataframe_to_csv_bytes(predictions_df)
+                    st.download_button(
+                        label="Скачать предсказания в CSV",
+                        data=predictions_csv,
+                        file_name="best_configuration_predictions.csv",
+                        mime="text/csv",
+                    )
+
                     if st.button("Сохранить лучшую модель", key="save_model_button"):
-                        path = save_model(best_model, best_model_name)
+                        path = save_model(best_model, f"{best_mode}_{best_model_name}")
                         st.success(f"Модель сохранена: {path}")
                 else:
                     st.warning("После обучения таблица результатов оказалась пустой.")
-
             else:
                 st.info("Нажми «Обучить модели» в боковой панели.")
 
@@ -227,16 +296,17 @@ else:
                 if results_df.empty:
                     st.warning("Нет результатов для интерпретации.")
                 else:
-                    best_model_name = results_df.iloc[0]["Model"]
-                    best_model = models[best_model_name]
+                    best_row = results_df.iloc[0]
+                    best_mode = best_row["Mode"]
+                    best_model_name = best_row["Model"]
+                    best_model = models[(best_mode, best_model_name)]
 
-                    st.write(f"Текущая лучшая модель: **{best_model_name}**")
+                    st.write(f"Текущая лучшая конфигурация: **{best_model_name} ({best_mode})**")
 
                     if best_model_name == "Linear Regression":
                         st.markdown(
                             "Для линейной регрессии интерпретация выполняется через анализ коэффициентов признаков."
                         )
-
                         coef_df = get_linear_regression_coefficients(best_model)
                         st.dataframe(coef_df.head(20), width="stretch")
 
