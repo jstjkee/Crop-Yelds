@@ -46,11 +46,46 @@ else:
             else len(raw_df.columns) - 1
         )
 
-        target_col = st.selectbox(
-            "Выбери целевую колонку",
-            options=raw_df.columns.tolist(),
-            index=default_index,
-        )
+        with st.sidebar:
+            st.header("Настройки")
+
+            target_col = st.selectbox(
+                "Целевая колонка",
+                options=raw_df.columns.tolist(),
+                index=default_index,
+            )
+
+            selected_models = st.multiselect(
+                "Модели",
+                options=["Linear Regression", "Random Forest", "KNN Regressor", "SVR"],
+                default=["Linear Regression", "Random Forest"],
+            )
+
+            sample_size = st.selectbox(
+                "Размер выборки",
+                options=[5000, 10000, 20000, 50000, None],
+                index=1,
+                format_func=lambda x: "Весь датасет" if x is None else str(x),
+            )
+
+            use_pca = st.checkbox("Использовать PCA", value=False)
+
+            pca_components = 7
+            if use_pca:
+                pca_components = st.slider(
+                    "Количество компонент PCA",
+                    min_value=2,
+                    max_value=20,
+                    value=7,
+                )
+
+            if "SVR" in selected_models and sample_size is not None and sample_size > 20000:
+                st.warning("SVR может обучаться очень долго на больших выборках.")
+
+            if "KNN Regressor" in selected_models and sample_size is not None and sample_size > 50000:
+                st.warning("KNN может заметно замедляться на больших выборках.")
+
+            run_training = st.button("Обучить модели", key="train_button_sidebar")
 
         df = clean_dataset(raw_df, target_col)
         info = basic_info(df)
@@ -88,39 +123,15 @@ else:
                     st.pyplot(fig_box, width="content")
 
         with tab_train:
-            st.subheader("Настройки обучения")
+            st.subheader("Обучение и результаты")
 
-            selected_models = st.multiselect(
-                "Выбери модели",
-                options=["Linear Regression", "Random Forest", "KNN Regressor", "SVR"],
-                default=["Linear Regression", "Random Forest"],
-            )
+            st.markdown("### Текущая конфигурация")
+            c1, c2, c3 = st.columns(3)
+            c1.write(f"**Target:** {target_col}")
+            c2.write(f"**PCA:** {'Да' if use_pca else 'Нет'}")
+            c3.write(f"**Размер выборки:** {'Весь датасет' if sample_size is None else sample_size}")
 
-            sample_size = st.selectbox(
-                "Размер выборки для обучения",
-                options=[5000, 10000, 20000, 50000, None],
-                index=1,
-                format_func=lambda x: "Весь датасет" if x is None else str(x),
-            )
-
-            use_pca = st.checkbox("Использовать PCA", value=False)
-
-            pca_components = 7
-            if use_pca:
-                pca_components = st.slider(
-                    "Количество компонент PCA",
-                    min_value=2,
-                    max_value=20,
-                    value=7,
-                )
-
-            if "SVR" in selected_models and sample_size is not None and sample_size > 20000:
-                st.warning("SVR может обучаться очень долго на больших выборках.")
-
-            if "KNN Regressor" in selected_models and sample_size is not None and sample_size > 50000:
-                st.warning("KNN может заметно замедляться на больших выборках.")
-
-            run_training = st.button("Обучить модели", key="train_button")
+            st.write(f"**Модели:** {', '.join(selected_models) if selected_models else 'не выбраны'}")
 
             if run_training:
                 if not selected_models:
@@ -161,23 +172,32 @@ else:
                 y_test = st.session_state["y_test"]
                 predictions = st.session_state["predictions"]
 
-                st.subheader("Результаты моделей")
-                st.dataframe(results_df, width="stretch")
-
-                csv_bytes = dataframe_to_csv_bytes(results_df)
-                st.download_button(
-                    label="Скачать метрики в CSV",
-                    data=csv_bytes,
-                    file_name="model_metrics.csv",
-                    mime="text/csv",
-                )
-
                 if not results_df.empty:
                     best_model_name = results_df.iloc[0]["Model"]
                     best_model = models[best_model_name]
+                    best_row = results_df.iloc[0]
                     best_pred_test = predictions[best_model_name]["test"]
 
-                    st.subheader(f"Лучшая модель: {best_model_name}")
+                    st.markdown("### Лучшая модель")
+
+                    s1, s2, s3, s4 = st.columns(4)
+                    s1.metric("Модель", best_model_name)
+                    s2.metric("Test R²", f"{best_row['Test R2']:.4f}")
+                    s3.metric("Test MAE", f"{best_row['Test MAE']:.4f}")
+                    s4.metric("Test MSE", f"{best_row['Test MSE']:.4f}")
+
+                    st.subheader("Таблица результатов")
+                    st.dataframe(results_df, width="stretch")
+
+                    csv_bytes = dataframe_to_csv_bytes(results_df)
+                    st.download_button(
+                        label="Скачать метрики в CSV",
+                        data=csv_bytes,
+                        file_name="model_metrics.csv",
+                        mime="text/csv",
+                    )
+
+                    st.subheader(f"График: {best_model_name}")
                     fig = plot_actual_vs_predicted(
                         y_true=y_test.reset_index(drop=True),
                         y_pred=best_pred_test.reset_index(drop=True),
@@ -188,12 +208,17 @@ else:
                     if st.button("Сохранить лучшую модель", key="save_model_button"):
                         path = save_model(best_model, best_model_name)
                         st.success(f"Модель сохранена: {path}")
+                else:
+                    st.warning("После обучения таблица результатов оказалась пустой.")
+
+            else:
+                st.info("Нажми «Обучить модели» в боковой панели.")
 
         with tab_explain:
             st.subheader("Интерпретация модели")
 
             if "results_df" not in st.session_state:
-                st.info("Сначала обучи модели во вкладке «Обучение».")
+                st.info("Сначала обучи модели.")
             else:
                 results_df = st.session_state["results_df"]
                 models = st.session_state["models"]
@@ -234,7 +259,7 @@ else:
 
                         with st.spinner("Строится SHAP summary plot..."):
                             shap_fig = build_shap_summary_plot(best_model, X_shap, max_display=20)
-                        st.pyplot(shap_fig, width="content")
+                        st.pyplot(shap_fig, width="stretch")
 
                     else:
                         st.info(
