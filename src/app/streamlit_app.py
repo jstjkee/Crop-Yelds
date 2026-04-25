@@ -111,6 +111,7 @@ def style_results_table(df: pd.DataFrame):
         }
     )
 
+
 def filter_results_for_display(
     results_df: pd.DataFrame,
     selected_mode_filter: str,
