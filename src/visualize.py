@@ -68,10 +68,17 @@ def dataframe_to_csv_bytes(df: pd.DataFrame) -> bytes:
     return df.to_csv(index=False).encode("utf-8")
 
 def build_predictions_dataframe(y_true: pd.Series, y_pred: pd.Series) -> pd.DataFrame:
+    y_true_series = pd.Series(y_true).reset_index(drop=True)
+    y_pred_series = pd.Series(y_pred).reset_index(drop=True)
+
+    min_len = min(len(y_true_series), len(y_pred_series))
+    y_true_series = y_true_series.iloc[:min_len]
+    y_pred_series = y_pred_series.iloc[:min_len]
+
     result = pd.DataFrame(
         {
-            "actual": y_true.reset_index(drop=True),
-            "predicted": y_pred.reset_index(drop=True),
+            "actual": y_true_series,
+            "predicted": y_pred_series,
         }
     )
     result["residual"] = result["actual"] - result["predicted"]

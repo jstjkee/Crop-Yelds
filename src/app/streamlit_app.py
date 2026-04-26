@@ -55,6 +55,7 @@ def build_experiment_conclusion(results_df: pd.DataFrame) -> list[str]:
             f"На тестовой выборке модель показала "
             f"**R² = {best_row['Test R2']:.4f}**, "
             f"**MAE = {best_row['Test MAE']:.4f}**, "
+            f"**RMSE = {best_row['Test RMSE']:.4f}**, "
             f"**MSE = {best_row['Test MSE']:.4f}**."
         ),
     ]
@@ -102,9 +103,11 @@ def style_results_table(df: pd.DataFrame):
             for col in [
                 "Train MAE",
                 "Train MSE",
+                "Train RMSE",
                 "Train R2",
                 "Test MAE",
                 "Test MSE",
+                "Test RMSE",
                 "Test R2",
             ]
             if col in df.columns
@@ -430,12 +433,13 @@ else:
 
                     st.markdown("### Итог эксперимента")
 
-                    summary_col1, summary_col2, summary_col3, summary_col4, summary_col5 = st.columns(5)
+                    summary_col1, summary_col2, summary_col3, summary_col4, summary_col5, summary_col6 = st.columns(6)
                     summary_col1.metric("Режим", best_mode)
                     summary_col2.metric("Модель", best_model_name)
                     summary_col3.metric("Test R²", f"{best_row['Test R2']:.4f}")
                     summary_col4.metric("Test MAE", f"{best_row['Test MAE']:.4f}")
-                    summary_col5.metric("Test MSE", f"{best_row['Test MSE']:.4f}")
+                    summary_col5.metric("Test RMSE", f"{best_row['Test RMSE']:.4f}")
+                    summary_col6.metric("Test MSE", f"{best_row['Test MSE']:.4f}")
 
                     with st.container(border=True):
                         st.markdown("### Краткие выводы")
@@ -486,8 +490,10 @@ else:
 
                     with display_col2:
                         st.subheader("График лучшей конфигурации")
+                        best_true_test = predictions[(best_mode, best_model_name)]["y_test"]
+
                         fig = plot_actual_vs_predicted(
-                            y_true=y_test.reset_index(drop=True),
+                            y_true=best_true_test.reset_index(drop=True),
                             y_pred=best_pred_test.reset_index(drop=True),
                             title=f"Actual vs Predicted — {best_model_name} ({best_mode})",
                         )
@@ -497,9 +503,11 @@ else:
                             path = save_model(best_model, f"{best_mode}_{best_model_name}")
                             st.success(f"Модель сохранена: {path}")
 
+                    best_true_test = predictions[(best_mode, best_model_name)]["y_test"]
+
                     predictions_df = build_predictions_dataframe(
-                        y_true=y_test,
-                        y_pred=best_pred_test,
+                        y_true=best_true_test,
+                        y_pred=best_pred_test.reset_index(drop=True),
                     )
 
                     with st.expander("Предсказания лучшей конфигурации"):

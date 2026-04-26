@@ -1,13 +1,17 @@
 from __future__ import annotations
 from typing import Dict, Tuple
+import numpy as np
 import pandas as pd
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
-
 def _calc_metrics(y_true, y_pred) -> dict:
+    mse = float(mean_squared_error(y_true, y_pred))
+    rmse = float(np.sqrt(mse))
+
     return {
         "MAE": float(mean_absolute_error(y_true, y_pred)),
-        "MSE": float(mean_squared_error(y_true, y_pred)),
+        "MSE": mse,
+        "RMSE": rmse,
         "R2": float(r2_score(y_true, y_pred)),
     }
 
@@ -21,9 +25,11 @@ def evaluate_model(model, X_train, y_train, X_test, y_test) -> Tuple[dict, pd.Se
     metrics = {
         "Train MAE": train_metrics["MAE"],
         "Train MSE": train_metrics["MSE"],
+        "Train RMSE": train_metrics["RMSE"],
         "Train R2": train_metrics["R2"],
         "Test MAE": test_metrics["MAE"],
         "Test MSE": test_metrics["MSE"],
+        "Test RMSE": test_metrics["RMSE"],
         "Test R2": test_metrics["R2"],
     }
 
@@ -57,6 +63,8 @@ def evaluate_all_models(models: Dict[str, object], X_train, y_train, X_test, y_t
         predictions[(mode_name, model_name)] = {
             "train": y_pred_train,
             "test": y_pred_test,
+            "y_train": y_train.reset_index(drop=True),
+            "y_test": y_test.reset_index(drop=True),
         }
 
     results_df = (
