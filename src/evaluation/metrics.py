@@ -1,76 +1,79 @@
 from __future__ import annotations
-from typing import Dict, Tuple
+
 import numpy as np
 import pandas as pd
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
-def _calc_metrics(y_true, y_pred) -> dict:
-    mse = float(mean_squared_error(y_true, y_pred))
-    rmse = float(np.sqrt(mse))
 
+def regression_metrics(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+) -> dict[str, float]:
+    y_true = np.asarray(y_true).ravel()
+    y_pred = np.asarray(y_pred).ravel()
+
+    mse = mean_squared_error(y_true, y_pred)
     return {
-        "MAE": float(mean_absolute_error(y_true, y_pred)),
-        "MSE": mse,
-        "RMSE": rmse,
-        "R2": float(r2_score(y_true, y_pred)),
+        "mae": float(mean_absolute_error(y_true, y_pred)),
+        "mse": float(mse),
+        "rmse": float(np.sqrt(mse)),
+        "r2": float(r2_score(y_true, y_pred)),
     }
 
-def evaluate_model(model, X_train, y_train, X_test, y_test) -> Tuple[dict, pd.Series, pd.Series]:
-    y_pred_train = model.predict(X_train)
-    y_pred_test = model.predict(X_test)
 
-    train_metrics = _calc_metrics(y_train, y_pred_train)
-    test_metrics = _calc_metrics(y_test, y_pred_test)
+def regression_metrics_by_crop(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    crop_ids: np.ndarray,
+    id_to_crop: dict[int, str],
+) -> pd.DataFrame:
+    y_true = np.asarray(y_true).ravel()
+    y_pred = np.asarray(y_pred).ravel()
+    crop_ids = np.asarray(crop_ids).ravel()
 
-    metrics = {
-        "Train MAE": train_metrics["MAE"],
-        "Train MSE": train_metrics["MSE"],
-        "Train RMSE": train_metrics["RMSE"],
-        "Train R2": train_metrics["R2"],
-        "Test MAE": test_metrics["MAE"],
-        "Test MSE": test_metrics["MSE"],
-        "Test RMSE": test_metrics["RMSE"],
-        "Test R2": test_metrics["R2"],
-    }
+    if not (len(y_true) == len(y_pred) == len(crop_ids)):
+        raise ValueError("Длины y_true, y_pred и crop_ids должны совпадать")
 
-    return (
-        metrics,
-        pd.Series(y_pred_train, index=y_train.index, name="train_prediction"),
-        pd.Series(y_pred_test, index=y_test.index, name="test_prediction"),
-    )
+    rows: list[dict[str, float | int | str]] = []
 
-def evaluate_all_models(models: Dict[str, object], X_train, y_train, X_test, y_test, mode_name: str):
-    rows = []
-    predictions = {}
+    for crop_id in sorted(np.unique(crop_ids).tolist()):
+        mask = crop_ids == crop_id
+        crop_name = id_to_crop.get(int(crop_id), f"crop_{crop_id}")
 
-    for model_name, model in models.items():
-        metrics, y_pred_train, y_pred_test = evaluate_model(
-            model=model,
-            X_train=X_train,
-            y_train=y_train,
-            X_test=X_test,
-            y_test=y_test,
-        )
-
+        metrics = regression_metrics(y_true[mask], y_pred[mask])
         rows.append(
             {
-                "Mode": mode_name,
-                "Model": model_name,
-                **metrics,
+                "crop_id": int(crop_id),
+                "crop": crop_name,
+                "count": int(mask.sum()),
+                "mae": metrics["mae"],
+                "mse": metrics["mse"],
+                "rmse": metrics["rmse"],
+                "r2": metrics["r2"],
             }
         )
 
-        predictions[(mode_name, model_name)] = {
-            "train": y_pred_train,
-            "test": y_pred_test,
-            "y_train": y_train.reset_index(drop=True),
-            "y_test": y_test.reset_index(drop=True),
-        }
+    return pd.DataFrame(rows).sort_values(["crop"]).reset_index(drop=True)
 
-    results_df = (
-        pd.DataFrame(rows)
-        .sort_values(by="Test R2", ascending=False)
-        .reset_index(drop=True)
-    )
 
-    return results_df, predictions
+def build_metrics_row(
+    model_name: str,
+    feature_mode: str,
+    split_name: str,
+    metrics: dict[str, float],
+    extra: dict | None = None,
+) -> dict:
+    row = {
+        "model": model_name,
+        "feature_mode": feature_mode,
+        "split": split_name,
+        "mae": metrics["mae"],
+        "mse": metrics["mse"],
+        "rmse": metrics["rmse"],
+        "r2": metrics["r2"],
+    }
+
+    if extra:
+        row.update(extra)
+
+    return row
