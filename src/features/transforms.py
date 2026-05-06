@@ -24,6 +24,7 @@ from src.models.autoencoder import (
 class FeatureTransformResult:
     mode: str
     X_train: np.ndarray
+    X_val: np.ndarray
     X_test: np.ndarray
     transformer: Any | None = None
     metadata: dict[str, Any] | None = None
@@ -43,14 +44,17 @@ def _resolve_n_components(X_train: np.ndarray) -> int:
 
 def apply_raw_features(
     X_train: np.ndarray,
+    X_val: np.ndarray,
     X_test: np.ndarray,
 ) -> FeatureTransformResult:
     X_train = _ensure_2d_float32(X_train, "X_train")
+    X_val = _ensure_2d_float32(X_val, "X_val")
     X_test = _ensure_2d_float32(X_test, "X_test")
 
     return FeatureTransformResult(
         mode="raw",
         X_train=X_train,
+        X_val=X_val,
         X_test=X_test,
         transformer=None,
         metadata={
@@ -62,15 +66,18 @@ def apply_raw_features(
 
 def apply_pca_features(
     X_train: np.ndarray,
+    X_val: np.ndarray,
     X_test: np.ndarray,
 ) -> FeatureTransformResult:
     X_train = _ensure_2d_float32(X_train, "X_train")
+    X_val = _ensure_2d_float32(X_val, "X_val")
     X_test = _ensure_2d_float32(X_test, "X_test")
 
     n_components = _resolve_n_components(X_train)
     pca = PCA(n_components=n_components, random_state=RANDOM_STATE)
 
     X_train_pca = pca.fit_transform(X_train).astype(np.float32)
+    X_val_pca = pca.transform(X_val).astype(np.float32)
     X_test_pca = pca.transform(X_test).astype(np.float32)
 
     explained_variance_ratio = float(np.sum(pca.explained_variance_ratio_))
@@ -78,6 +85,7 @@ def apply_pca_features(
     return FeatureTransformResult(
         mode="pca",
         X_train=X_train_pca,
+        X_val=X_val_pca,
         X_test=X_test_pca,
         transformer=pca,
         metadata={
@@ -91,9 +99,11 @@ def apply_pca_features(
 
 def apply_umap_features(
     X_train: np.ndarray,
+    X_val: np.ndarray,
     X_test: np.ndarray,
 ) -> FeatureTransformResult:
     X_train = _ensure_2d_float32(X_train, "X_train")
+    X_val = _ensure_2d_float32(X_val, "X_val")
     X_test = _ensure_2d_float32(X_test, "X_test")
 
     if umap is None:
@@ -103,35 +113,39 @@ def apply_umap_features(
 
     reducer = umap.UMAP(
         n_components=n_components,
-        n_neighbors=15,
-        min_dist=0.1,
+        n_neighbors=10,
+        min_dist=0.2,
         random_state=RANDOM_STATE,
     )
 
     X_train_umap = reducer.fit_transform(X_train).astype(np.float32)
+    X_val_umap = reducer.transform(X_val).astype(np.float32)
     X_test_umap = reducer.transform(X_test).astype(np.float32)
 
     return FeatureTransformResult(
         mode="umap",
         X_train=X_train_umap,
+        X_val=X_val_umap,
         X_test=X_test_umap,
         transformer=reducer,
         metadata={
             "input_dim_before": int(X_train.shape[1]),
             "input_dim_after": int(X_train_umap.shape[1]),
             "n_components": int(n_components),
-            "n_neighbors": 15,
-            "min_dist": 0.1,
+            "n_neighbors": 10,
+            "min_dist": 0.2,
         },
     )
 
 
 def apply_autoencoder_features(
     X_train: np.ndarray,
+    X_val: np.ndarray,
     X_test: np.ndarray,
     device: str,
 ) -> FeatureTransformResult:
     X_train = _ensure_2d_float32(X_train, "X_train")
+    X_val = _ensure_2d_float32(X_val, "X_val")
     X_test = _ensure_2d_float32(X_test, "X_test")
 
     ae: Autoencoder = build_autoencoder(
@@ -150,23 +164,31 @@ def apply_autoencoder_features(
         verbose=True,
     )
 
+    batch_size = int(AUTOENCODER_CONFIG.get("batch_size", 256))
+
     X_train_ae = encode_features(
         model=ae,
         X=X_train,
         device=device,
-        batch_size=int(AUTOENCODER_CONFIG.get("batch_size", 256)),
+        batch_size=batch_size,
     )
-
+    X_val_ae = encode_features(
+        model=ae,
+        X=X_val,
+        device=device,
+        batch_size=batch_size,
+    )
     X_test_ae = encode_features(
         model=ae,
         X=X_test,
         device=device,
-        batch_size=int(AUTOENCODER_CONFIG.get("batch_size", 256)),
+        batch_size=batch_size,
     )
 
     return FeatureTransformResult(
         mode="autoencoder",
         X_train=X_train_ae,
+        X_val=X_val_ae,
         X_test=X_test_ae,
         transformer=ae,
         metadata={
@@ -180,21 +202,22 @@ def apply_autoencoder_features(
 def build_feature_view(
     mode: str,
     X_train: np.ndarray,
+    X_val: np.ndarray,
     X_test: np.ndarray,
     device: str,
 ) -> FeatureTransformResult:
     normalized_mode = mode.lower().strip()
 
     if normalized_mode == "raw":
-        return apply_raw_features(X_train, X_test)
+        return apply_raw_features(X_train, X_val, X_test)
 
     if normalized_mode == "pca":
-        return apply_pca_features(X_train, X_test)
+        return apply_pca_features(X_train, X_val, X_test)
 
     if normalized_mode == "umap":
-        return apply_umap_features(X_train, X_test)
+        return apply_umap_features(X_train, X_val, X_test)
 
     if normalized_mode == "autoencoder":
-        return apply_autoencoder_features(X_train, X_test, device=device)
+        return apply_autoencoder_features(X_train, X_val, X_test, device=device)
 
     raise ValueError(f"Неизвестный режим признаков: {mode}")

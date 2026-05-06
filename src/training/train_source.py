@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -159,6 +159,14 @@ def train_transformer_for_mode(
         shuffle=True,
         num_workers=num_workers,
     )
+    val_loader = make_loader(
+        X=feature_result.X_val,
+        y=prepared.y_val,
+        crop_ids=prepared.crop_val,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+    )
     test_loader = make_loader(
         X=feature_result.X_test,
         y=prepared.y_test,
@@ -181,7 +189,7 @@ def train_transformer_for_mode(
     )
     criterion = nn.MSELoss()
 
-    best_rmse = float("inf")
+    best_val_rmse = float("inf")
     best_state = None
 
     for epoch in range(epochs):
@@ -193,29 +201,30 @@ def train_transformer_for_mode(
             device=device,
         )
 
-        y_true, y_pred = predict(model, test_loader, device)
-        metrics = regression_metrics(y_true, y_pred)
+        y_val_true, y_val_pred = predict(model, val_loader, device)
+        val_metrics = regression_metrics(y_val_true, y_val_pred)
 
-        if metrics["rmse"] < best_rmse:
-            best_rmse = metrics["rmse"]
+        if val_metrics["rmse"] < best_val_rmse:
+            best_val_rmse = val_metrics["rmse"]
             best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
 
         print(
             f"[transformer][{mode}] Epoch {epoch + 1:03d} | "
             f"train_loss={train_loss:.6f} | "
-            f"mae={metrics['mae']:.4f} | "
-            f"rmse={metrics['rmse']:.4f} | "
-            f"r2={metrics['r2']:.4f}"
+            f"val_mae={val_metrics['mae']:.4f} | "
+            f"val_rmse={val_metrics['rmse']:.4f} | "
+            f"val_r2={val_metrics['r2']:.4f}"
         )
 
     if best_state is not None:
         model.load_state_dict(best_state)
 
-    y_true, y_pred = predict(model, test_loader, device)
-    final_metrics = regression_metrics(y_true, y_pred)
+    y_test_true, y_test_pred = predict(model, test_loader, device)
+    final_metrics = regression_metrics(y_test_true, y_test_pred)
+
     by_crop_df = regression_metrics_by_crop(
-        y_true=y_true,
-        y_pred=y_pred,
+        y_true=y_test_true,
+        y_pred=y_test_pred,
         crop_ids=prepared.crop_test,
         id_to_crop=prepared.id_to_crop,
     )
@@ -249,6 +258,7 @@ def run_transformer_experiments(
         feature_result = build_feature_view(
             mode=mode,
             X_train=prepared.X_train,
+            X_val=prepared.X_val,
             X_test=prepared.X_test,
             device=device,
         )
@@ -291,6 +301,7 @@ def run_baseline_experiments(
     print("=" * 100)
     print("Запуск baseline-моделей на raw признаках")
 
+    # baselines учим только на train и оцениваем только на test
     baseline_results = train_all_baselines(
         X_train=prepared.X_train,
         y_train=prepared.y_train,
@@ -380,11 +391,13 @@ def main() -> None:
         crop_col=CROP_COL,
         test_size=TEST_SIZE,
         random_state=RANDOM_STATE,
+        val_size_from_train=0.2,
     )
 
     print("=" * 100)
     print("Подготовка датасета завершена")
     print(f"X_train shape: {prepared.X_train.shape}")
+    print(f"X_val shape: {prepared.X_val.shape}")
     print(f"X_test shape: {prepared.X_test.shape}")
     print(f"Количество культур: {len(prepared.crop_to_id)}")
     print(f"Культуры: {prepared.crop_to_id}")
