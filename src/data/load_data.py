@@ -9,6 +9,8 @@ def load_csv(path: str | Path, **kwargs) -> pd.DataFrame:
     csv_path = Path(path)
     if not csv_path.exists():
         raise FileNotFoundError(f"CSV файл не найден: {csv_path}")
+    if "low_memory" not in kwargs:
+        kwargs["low_memory"] = False
     return pd.read_csv(csv_path, **kwargs)
 
 

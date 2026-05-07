@@ -244,3 +244,38 @@ def prepare_dataset(
         numeric_cols=numeric_cols,
         categorical_cols=categorical_cols,
     )
+
+
+def transform_external_dataset(
+    df: pd.DataFrame,
+    preprocessor: ColumnTransformer,
+    crop_to_id: dict[str, int],
+    target_col: str,
+    crop_col: str,
+) -> dict[str, Any]:
+    validate_required_columns(df, target_col, crop_col)
+    filtered = drop_invalid_rows(df, target_col, crop_col)
+    filtered = filtered[filtered[crop_col].astype(str).isin(crop_to_id.keys())].reset_index(drop=True)
+
+    if filtered.empty:
+        return {
+            "X": np.empty((0, 0), dtype=np.float32),
+            "y": np.empty((0,), dtype=np.float32),
+            "crop_ids": np.empty((0,), dtype=np.int64),
+            "df": filtered,
+        }
+
+    X = preprocessor.transform(filtered.drop(columns=[target_col]))
+    if hasattr(X, "toarray"):
+        X = X.toarray()
+    X = np.asarray(X, dtype=np.float32)
+
+    y = filtered[target_col].to_numpy(dtype=np.float32)
+    crop_ids = encode_crop_ids(filtered[crop_col], crop_to_id)
+
+    return {
+        "X": X,
+        "y": y,
+        "crop_ids": crop_ids,
+        "df": filtered,
+    }

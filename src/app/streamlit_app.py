@@ -1,30 +1,31 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 import pandas as pd
 import streamlit as st
-import torch
 
 from src.config import (
     CROP_COL,
+    DATASET_PATHS,
     FEATURE_MODES,
     METRICS_DIR,
-    RANDOM_STATE,
-    SOURCE_DATA_PATH,
     TARGET_COL,
-    TEST_SIZE,
     ensure_project_dirs,
 )
 from src.data.load_data import load_and_validate_source_data, summarize_dataframe
 from src.data.preprocess import prepare_dataset
+from src.data.russian_parser import prepare_russian_real_dataset
 from src.features.transforms import build_feature_view
-from src.models.baselines import train_all_baselines
-from src.training.train_source import (
-    get_device,
-    run_transformer_experiments,
-)
-
+from src.training.train_russia_only import main as run_russia_real_training
+from src.training.train_source import get_device, main as run_source_training, run_training_pipeline
+from src.training.train_source import seed_everything
+from src.config import RANDOM_STATE
 
 st.set_page_config(
     page_title="Прогноз урожайности",
@@ -32,40 +33,44 @@ st.set_page_config(
     layout="wide",
 )
 
+DATASET_OPTIONS = {
+    "source": {
+        "label": "Исходный датасет",
+        "path": DATASET_PATHS["source"],
+        "results_prefix": "source",
+    },
+    "russian_legacy": {
+        "label": "Россия exact-match",
+        "path": DATASET_PATHS["russian_legacy"],
+        "results_prefix": "russian_legacy",
+    },
+    "russian_real": {
+        "label": "Россия реальные признаки (v4)",
+        "path": DATASET_PATHS["russian_real_project"],
+        "results_prefix": "russia_real_v4",
+    },
+}
+
 
 @st.cache_data(show_spinner=False)
-def load_source_dataframe(path: str | Path, target_col: str, crop_col: str) -> pd.DataFrame:
-    return load_and_validate_source_data(
-        path=path,
-        target_col=target_col,
-        crop_col=crop_col,
-    )
+def load_dataframe(path: str | Path, target_col: str, crop_col: str) -> pd.DataFrame:
+    return load_and_validate_source_data(path=path, target_col=target_col, crop_col=crop_col)
 
 
 @st.cache_data(show_spinner=False)
-def build_prepared_dataset(
-    path: str | Path,
-    target_col: str,
-    crop_col: str,
-    test_size: float,
-    random_state: int,
-):
-    df = load_source_dataframe(path, target_col, crop_col)
-    return prepare_dataset(
-        df=df,
-        target_col=target_col,
-        crop_col=crop_col,
-        test_size=test_size,
-        random_state=random_state,
-    )
+def build_prepared_dataset(path: str | Path, target_col: str, crop_col: str):
+    df = load_dataframe(path, target_col, crop_col)
+    return prepare_dataset(df=df, target_col=target_col, crop_col=crop_col)
+
+
+def resolve_dataset_path(dataset_key: str) -> Path:
+    if dataset_key == "russian_real":
+        prepare_russian_real_dataset(force=False)
+    return Path(DATASET_OPTIONS[dataset_key]["path"])
 
 
 def render_dataset_info(df: pd.DataFrame) -> None:
-    info = summarize_dataframe(
-        df=df,
-        target_col=TARGET_COL,
-        crop_col=CROP_COL,
-    )
+    info = summarize_dataframe(df=df, target_col=TARGET_COL, crop_col=CROP_COL)
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Строк", info["n_rows"])
@@ -74,12 +79,7 @@ def render_dataset_info(df: pd.DataFrame) -> None:
     c4.metric("Пропусков", info["n_missing_total"])
 
     with st.expander("Распределение по культурам", expanded=False):
-        crop_counts = pd.DataFrame(
-            {
-                "crop": list(info["crop_counts"].keys()),
-                "count": list(info["crop_counts"].values()),
-            }
-        )
+        crop_counts = pd.DataFrame({"crop": list(info["crop_counts"].keys()), "count": list(info["crop_counts"].values())})
         st.dataframe(crop_counts, use_container_width=True)
 
     with st.expander("Первые строки датасета", expanded=False):
@@ -88,19 +88,14 @@ def render_dataset_info(df: pd.DataFrame) -> None:
 
 def render_prepared_info(prepared) -> None:
     st.subheader("Подготовленные данные")
-
-    c1, c2, c3 = st.columns(3)
-    c1.metric("X_train shape", str(prepared.X_train.shape))
-    c2.metric("X_test shape", str(prepared.X_test.shape))
-    c3.metric("Культур в модели", len(prepared.crop_to_id))
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("X_train", str(prepared.X_train.shape))
+    c2.metric("X_val", str(prepared.X_val.shape))
+    c3.metric("X_test", str(prepared.X_test.shape))
+    c4.metric("Культур", len(prepared.crop_to_id))
 
     with st.expander("Сопоставление культур", expanded=False):
-        crop_map_df = pd.DataFrame(
-            {
-                "crop": list(prepared.crop_to_id.keys()),
-                "crop_id": list(prepared.crop_to_id.values()),
-            }
-        )
+        crop_map_df = pd.DataFrame({"crop": list(prepared.crop_to_id.keys()), "crop_id": list(prepared.crop_to_id.values())})
         st.dataframe(crop_map_df, use_container_width=True)
 
     with st.expander("Колонки признаков", expanded=False):
@@ -111,16 +106,15 @@ def render_prepared_info(prepared) -> None:
 
 
 def render_feature_preview(prepared, selected_mode: str) -> None:
-    device = get_device()
     feature_result = build_feature_view(
         mode=selected_mode,
         X_train=prepared.X_train,
+        X_val=prepared.X_val,
         X_test=prepared.X_test,
-        device=device,
+        device=get_device(),
     )
 
     st.subheader("Преобразование признаков")
-
     c1, c2, c3 = st.columns(3)
     c1.metric("Режим", selected_mode)
     c2.metric("Input dim before", prepared.X_train.shape[1])
@@ -129,105 +123,78 @@ def render_feature_preview(prepared, selected_mode: str) -> None:
     metadata = feature_result.metadata or {}
     if metadata:
         with st.expander("Метаданные преобразования", expanded=True):
-            meta_df = pd.DataFrame(
-                {"parameter": list(metadata.keys()), "value": list(metadata.values())}
-            )
+            meta_df = pd.DataFrame({"parameter": list(metadata.keys()), "value": list(metadata.values())})
             st.dataframe(meta_df, use_container_width=True)
 
 
-def render_saved_results() -> None:
+def render_saved_results(results_prefix: str) -> None:
     st.subheader("Сохраненные результаты")
-
-    summary_path = METRICS_DIR / "source_metrics_summary.csv"
+    summary_path = METRICS_DIR / f"{results_prefix}_metrics_summary.csv"
     if summary_path.exists():
         summary_df = pd.read_csv(summary_path)
         st.write("**Итоговая таблица метрик**")
         st.dataframe(summary_df, use_container_width=True)
     else:
-        st.info("Файл source_metrics_summary.csv пока не найден. Сначала запусти обучение.")
+        st.info("Файл с метриками пока не найден. Сначала запусти обучение.")
 
-    results_dir = Path("results") / "tables"
-    if results_dir.exists():
-        crop_files = sorted(results_dir.glob("source_metrics_by_crop_*.csv"))
+    tables_dir = Path("results") / "tables"
+    if tables_dir.exists():
+        crop_files = sorted(tables_dir.glob(f"{results_prefix}_metrics_by_crop_*.csv"))
         if crop_files:
             selected_file = st.selectbox(
                 "Выбери таблицу метрик по культурам",
                 options=[f.name for f in crop_files],
             )
-            selected_path = results_dir / selected_file
+            selected_path = tables_dir / selected_file
             crop_df = pd.read_csv(selected_path)
             st.dataframe(crop_df, use_container_width=True)
 
 
-def run_training_pipeline(prepared) -> None:
-    device = get_device()
+def run_selected_training(dataset_key: str, dataset_path: Path) -> None:
+    if dataset_key == "source":
+        run_source_training()
+        return
 
-    with st.spinner("Обучение transformer-моделей..."):
-        transformer_rows, transformer_by_crop = run_transformer_experiments(
-            prepared=prepared,
-            device=device,
-        )
+    if dataset_key == "russian_real":
+        run_russia_real_training()
+        return
 
-    with st.spinner("Обучение baseline-моделей..."):
-        baseline_results = train_all_baselines(
-            X_train=prepared.X_train,
-            y_train=prepared.y_train,
-            X_test=prepared.X_test,
-            y_test=prepared.y_test,
-        )
-
-    baseline_rows = []
-    for result in baseline_results:
-        baseline_rows.append(
-            {
-                "model": result.model_name,
-                "feature_mode": "raw",
-                "split": "test",
-                "mae": result.metrics["mae"],
-                "mse": result.metrics["mse"],
-                "rmse": result.metrics["rmse"],
-                "r2": result.metrics["r2"],
-            }
-        )
-
-    transformer_df = pd.DataFrame(transformer_rows)
-    baseline_df = pd.DataFrame(baseline_rows)
-
-    st.success("Обучение завершено")
-
-    st.subheader("Transformer results")
-    st.dataframe(transformer_df, use_container_width=True)
-
-    st.subheader("Baseline results")
-    st.dataframe(baseline_df, use_container_width=True)
-
-    st.subheader("Transformer metrics by crop")
-    available_modes = list(transformer_by_crop.keys())
-    selected_mode = st.selectbox(
-        "Выбери режим transformer для просмотра по культурам",
-        options=available_modes,
-        key="transformer_mode_results",
+    seed_everything(RANDOM_STATE)
+    df = load_dataframe(dataset_path, TARGET_COL, CROP_COL)
+    run_training_pipeline(
+        df=df,
+        dataset_label=dataset_key,
+        target_col=TARGET_COL,
+        crop_col=CROP_COL,
+        results_prefix="russian_legacy",
+        device=get_device(),
     )
-    st.dataframe(transformer_by_crop[selected_mode], use_container_width=True)
 
 
 def main() -> None:
     ensure_project_dirs()
 
     st.title("🌾 Прогноз урожайности")
-    st.caption("Multi-head Tabular Transformer + PCA / UMAP / Autoencoder")
+    st.caption("Multi-head Tabular Transformer + raw / PCA / UMAP / Autoencoder")
 
     with st.sidebar:
         st.header("Параметры")
         st.write(f"Device: **{get_device()}**")
-        st.write(f"Source path: `{SOURCE_DATA_PATH}`")
+        dataset_key = st.selectbox(
+            "Датасет",
+            options=list(DATASET_OPTIONS.keys()),
+            format_func=lambda key: DATASET_OPTIONS[key]["label"],
+            index=0,
+        )
+        dataset_path = resolve_dataset_path(dataset_key)
+        st.write(f"Path: `{dataset_path}`")
         st.write(f"Target column: `{TARGET_COL}`")
         st.write(f"Crop column: `{CROP_COL}`")
         selected_mode = st.selectbox("Режим признаков", FEATURE_MODES, index=0)
         run_training = st.button("Запустить обучение", type="primary", use_container_width=True)
 
     try:
-        df = load_source_dataframe(SOURCE_DATA_PATH, TARGET_COL, CROP_COL)
+        df = load_dataframe(dataset_path, TARGET_COL, CROP_COL)
     except Exception as exc:
         st.error(f"Ошибка загрузки датасета: {exc}")
         st.stop()
@@ -235,31 +202,28 @@ def main() -> None:
     render_dataset_info(df)
 
     try:
-        prepared = build_prepared_dataset(
-            path=SOURCE_DATA_PATH,
-            target_col=TARGET_COL,
-            crop_col=CROP_COL,
-            test_size=TEST_SIZE,
-            random_state=RANDOM_STATE,
-        )
+        prepared = build_prepared_dataset(dataset_path, TARGET_COL, CROP_COL)
     except Exception as exc:
         st.error(f"Ошибка подготовки датасета: {exc}")
         st.stop()
 
     render_prepared_info(prepared)
     render_feature_preview(prepared, selected_mode)
-    render_saved_results()
+    render_saved_results(DATASET_OPTIONS[dataset_key]["results_prefix"])
 
     st.divider()
 
     if run_training:
         try:
-            run_training_pipeline(prepared)
+            with st.spinner("Обучение запущено. Это может занять время..."):
+                run_selected_training(dataset_key, dataset_path)
+            st.success("Обучение завершено")
+            st.rerun()
         except Exception as exc:
             st.exception(exc)
 
     st.divider()
-    st.caption("Пока интерфейс работает только с исходным датасетом.")
+    st.caption("Теперь интерфейс поддерживает исходный датасет, russian legacy exact-match и russian real v4.")
 
 
 if __name__ == "__main__":

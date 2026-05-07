@@ -1,36 +1,30 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 import numpy as np
 import pandas as pd
 import torch
-from sklearn.decomposition import PCA
-
-try:
-    import umap
-except Exception:
-    umap = None
-
 from torch.utils.data import DataLoader, Dataset
 
 from src.config import (
-    AUTOENCODER_CONFIG,
-    CROP_COL,
+    FEATURE_MODES,
+    LEGACY_RUSSIAN_DATA_PATH,
+    METRICS_DIR,
+    MODEL_TYPES,
+    MODELS_DIR,
     RANDOM_STATE,
-    RESULTS_DIR,
-    RUSSIAN_DATA_PATH,
     SOURCE_DATA_PATH,
     TARGET_COL,
+    CROP_COL,
     TEST_SIZE,
-    TRANSFORMER_CONFIG,
-    TRAIN_CONFIG,
+    ensure_project_dirs,
 )
 from src.data.load_data import load_csv, validate_required_columns
 from src.data.preprocess import prepare_dataset, transform_external_dataset
 from src.evaluation.metrics import regression_metrics
-from src.models.autoencoder import build_autoencoder, encode_features, train_autoencoder
+from src.features.transforms import build_feature_view
+from src.models.mlp_resnet_multihead import build_multihead_mlp_resnet
 from src.models.multihead_transformer import build_multihead_transformer
+from src.training.target_scaler import TargetScaler
 
 
 class YieldDataset(Dataset):
@@ -51,11 +45,14 @@ def get_device() -> str:
 
 
 @torch.no_grad()
-def predict(model: torch.nn.Module, loader: DataLoader, device: str) -> tuple[np.ndarray, np.ndarray]:
+def predict_scaled(
+    model: torch.nn.Module,
+    loader: DataLoader,
+    device: str,
+) -> tuple[np.ndarray, np.ndarray]:
     model.eval()
-
-    y_true = []
-    y_pred = []
+    y_true_scaled = []
+    y_pred_scaled = []
 
     for xb, yb, cb in loader:
         xb = xb.to(device)
@@ -64,82 +61,55 @@ def predict(model: torch.nn.Module, loader: DataLoader, device: str) -> tuple[np
 
         preds = model(xb, cb)
 
-        y_true.append(yb.cpu().numpy())
-        y_pred.append(preds.cpu().numpy())
+        y_true_scaled.append(yb.cpu().numpy())
+        y_pred_scaled.append(preds.cpu().numpy())
 
-    return (
-        np.concatenate(y_true).ravel(),
-        np.concatenate(y_pred).ravel(),
-    )
+    return np.concatenate(y_true_scaled).ravel(), np.concatenate(y_pred_scaled).ravel()
 
 
-def build_feature_view_for_transfer(
+def build_model_from_checkpoint(checkpoint: dict, device: str) -> torch.nn.Module:
+    model_type = checkpoint.get("model_type", "transformer")
+    input_dim = int(checkpoint["input_dim"])
+    num_crops = len(checkpoint["crop_to_id"])
+
+    if model_type == "transformer":
+        config = checkpoint.get("model_config") or checkpoint.get("transformer_config")
+        if config is None:
+            raise ValueError("В checkpoint transformer отсутствует model_config/transformer_config")
+        model = build_multihead_transformer(
+            input_dim=input_dim,
+            num_crops=num_crops,
+            config=config,
+        ).to(device)
+
+    elif model_type == "mlp_resnet":
+        config = checkpoint.get("model_config")
+        if config is None:
+            raise ValueError("В checkpoint mlp_resnet отсутствует model_config")
+        model = build_multihead_mlp_resnet(
+            input_dim=input_dim,
+            num_crops=num_crops,
+            config=config,
+        ).to(device)
+
+    else:
+        raise ValueError(f"Неизвестный тип модели в checkpoint: {model_type}")
+
+    model.load_state_dict(checkpoint["model_state_dict"])
+    return model
+
+
+def resolve_checkpoint_path(model_type: str, mode: str) -> str:
+    return str(MODELS_DIR / f"{model_type}_{mode}.pt")
+
+
+def evaluate_transfer_for_model_and_mode(
+    model_type: str,
     mode: str,
-    X_source_train: np.ndarray,
-    X_external: np.ndarray,
     device: str,
-) -> tuple[np.ndarray, np.ndarray]:
-    mode = mode.lower()
-
-    if mode == "raw":
-        return X_source_train, X_external
-
-    if mode == "pca":
-        n_components = min(
-            TRAIN_CONFIG.get("transform_components", 16),
-            X_source_train.shape[0],
-            X_source_train.shape[1],
-        )
-        pca = PCA(n_components=n_components, random_state=RANDOM_STATE)
-        X_source_train_mode = pca.fit_transform(X_source_train).astype(np.float32)
-        X_external_mode = pca.transform(X_external).astype(np.float32)
-        return X_source_train_mode, X_external_mode
-
-    if mode == "umap":
-        if umap is None:
-            raise ImportError("UMAP не установлен. Установи пакет: pip install umap-learn")
-
-        n_components = min(
-            TRAIN_CONFIG.get("transform_components", 16),
-            X_source_train.shape[1],
-        )
-
-        reducer = umap.UMAP(
-            n_components=n_components,
-            n_neighbors=15,
-            min_dist=0.1,
-            random_state=RANDOM_STATE,
-        )
-        X_source_train_mode = reducer.fit_transform(X_source_train).astype(np.float32)
-        X_external_mode = reducer.transform(X_external).astype(np.float32)
-        return X_source_train_mode, X_external_mode
-
-    if mode == "autoencoder":
-        ae = build_autoencoder(
-            input_dim=X_source_train.shape[1],
-            config=AUTOENCODER_CONFIG,
-        )
-
-        ae = train_autoencoder(
-            model=ae,
-            X_train=X_source_train,
-            device=device,
-            epochs=AUTOENCODER_CONFIG.get("epochs", 30),
-            batch_size=AUTOENCODER_CONFIG.get("batch_size", 256),
-            lr=AUTOENCODER_CONFIG.get("lr", 1e-3),
-            weight_decay=AUTOENCODER_CONFIG.get("weight_decay", 0.0),
-        )
-
-        X_source_train_mode = encode_features(ae, X_source_train, device=device)
-        X_external_mode = encode_features(ae, X_external, device=device)
-        return X_source_train_mode, X_external_mode
-
-    raise ValueError(f"Неизвестный режим признаков: {mode}")
-
-
-def evaluate_transfer_for_mode(mode: str, device: str) -> dict:
+) -> dict:
     source_df = load_csv(SOURCE_DATA_PATH)
-    russian_df = load_csv(RUSSIAN_DATA_PATH)
+    russian_df = load_csv(LEGACY_RUSSIAN_DATA_PATH)
 
     validate_required_columns(source_df, TARGET_COL, CROP_COL)
     validate_required_columns(russian_df, TARGET_COL, CROP_COL)
@@ -152,97 +122,93 @@ def evaluate_transfer_for_mode(mode: str, device: str) -> dict:
         random_state=RANDOM_STATE,
     )
 
-    source_X_train = prepared_source["X_train"]
-    crop_to_id = prepared_source["crop_to_id"]
-    preprocessor = prepared_source["preprocessor"]
-
-    prepared_russian = transform_external_dataset(
+    external = transform_external_dataset(
         df=russian_df,
-        preprocessor=preprocessor,
-        crop_to_id=crop_to_id,
+        preprocessor=prepared_source.preprocessor,
+        crop_to_id=prepared_source.crop_to_id,
         target_col=TARGET_COL,
         crop_col=CROP_COL,
     )
 
-    X_russian = prepared_russian["X"]
-    y_russian = prepared_russian["y"]
-    crop_russian = prepared_russian["crop_ids"]
-    russian_filtered_df = prepared_russian["df"]
+    if len(external["X"]) == 0:
+        raise ValueError(
+            "После фильтрации в russian_crop_yield_clean.csv не осталось строк с известными культурами"
+        )
 
-    if len(X_russian) == 0:
-        raise ValueError("После фильтрации в российском датасете не осталось строк с известными культурами")
-
-    _, X_russian_mode = build_feature_view_for_transfer(
+    feature_view = build_feature_view(
         mode=mode,
-        X_source_train=source_X_train,
-        X_external=X_russian,
+        X_train=prepared_source.X_train,
+        X_val=external["X"],
+        X_test=external["X"],
         device=device,
     )
+    X_external = feature_view.X_test
 
-    test_dataset = YieldDataset(X_russian_mode, y_russian, crop_russian)
-    test_loader = DataLoader(
-        test_dataset,
-        batch_size=TRAIN_CONFIG.get("batch_size", 128),
-        shuffle=False,
-    )
-
-    checkpoint_path = Path(RESULTS_DIR) / "models" / f"multihead_transformer_{mode}.pt"
-    if not checkpoint_path.exists():
+    checkpoint_path = resolve_checkpoint_path(model_type=model_type, mode=mode)
+    checkpoint_path_obj = MODELS_DIR / f"{model_type}_{mode}.pt"
+    if not checkpoint_path_obj.exists():
         raise FileNotFoundError(
-            f"Не найден checkpoint для режима '{mode}': {checkpoint_path}. "
+            f"Не найден checkpoint для model_type='{model_type}', mode='{mode}': {checkpoint_path_obj}. "
             f"Сначала запусти обучение source-модели."
         )
 
-    checkpoint = torch.load(checkpoint_path, map_location=device)
+    checkpoint = torch.load(checkpoint_path_obj, map_location=device)
+    model = build_model_from_checkpoint(checkpoint=checkpoint, device=device)
 
-    model = build_multihead_transformer(
-        input_dim=checkpoint["input_dim"],
-        num_crops=len(checkpoint["crop_to_id"]),
-        config=checkpoint.get("transformer_config", TRANSFORMER_CONFIG),
-    ).to(device)
+    scaler = TargetScaler(
+        mean_=float(checkpoint.get("target_scaler_mean", prepared_source.y_train.mean())),
+        std_=float(checkpoint.get("target_scaler_std", prepared_source.y_train.std() or 1.0)),
+    )
 
-    model.load_state_dict(checkpoint["model_state_dict"])
+    y_external_scaled = scaler.transform(external["y"])
 
-    y_true, y_pred = predict(model, test_loader, device)
+    loader = DataLoader(
+        YieldDataset(X_external, y_external_scaled, external["crop_ids"]),
+        batch_size=256,
+        shuffle=False,
+    )
+
+    y_true_scaled, y_pred_scaled = predict_scaled(model, loader, device)
+    y_true = scaler.inverse_transform(y_true_scaled)
+    y_pred = scaler.inverse_transform(y_pred_scaled)
+
     metrics = regression_metrics(y_true, y_pred)
 
-    result = {
+    return {
+        "model_type": model_type,
         "mode": mode,
-        "dataset": "russian_transfer",
-        "num_rows": len(russian_filtered_df),
-        "num_crops": russian_filtered_df[CROP_COL].nunique(),
+        "dataset": "russian_legacy_transfer",
+        "num_rows": int(len(external["df"])),
+        "num_crops": int(external["df"][CROP_COL].nunique()),
         "mae": metrics["mae"],
         "mse": metrics["mse"],
         "rmse": metrics["rmse"],
         "r2": metrics["r2"],
-        "checkpoint_path": str(checkpoint_path),
+        "checkpoint_path": checkpoint_path,
     }
-    return result
 
 
 def main() -> None:
+    ensure_project_dirs()
     device = get_device()
-    print(f"Device: {device}")
-
-    modes = ["raw", "pca", "umap", "autoencoder"]
     results = []
 
-    for mode in modes:
-        print("=" * 80)
-        print(f"Transfer evaluation для режима: {mode}")
-        result = evaluate_transfer_for_mode(mode=mode, device=device)
-        results.append(result)
+    for model_type in MODEL_TYPES:
+        for mode in FEATURE_MODES:
+            print("=" * 80)
+            print(f"Transfer evaluation | model_type={model_type} | mode={mode}")
+            results.append(
+                evaluate_transfer_for_model_and_mode(
+                    model_type=model_type,
+                    mode=mode,
+                    device=device,
+                )
+            )
 
     results_df = pd.DataFrame(results)
-
-    results_dir = Path(RESULTS_DIR)
-    results_dir.mkdir(parents=True, exist_ok=True)
-
-    output_path = results_dir / "transfer_metrics.csv"
+    output_path = METRICS_DIR / "russian_legacy_transfer_metrics.csv"
     results_df.to_csv(output_path, index=False, encoding="utf-8-sig")
 
-    print("=" * 80)
-    print("Итоговые transfer-результаты:")
     print(results_df)
     print(f"CSV сохранен: {output_path}")
 

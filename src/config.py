@@ -3,9 +3,21 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
+RAW_DATA_DIR = DATA_DIR / "raw"
+PROCESSED_DATA_DIR = DATA_DIR / "processed"
 RESULTS_DIR = BASE_DIR / "results"
 
-SOURCE_DATA_PATH = DATA_DIR / "raw/crop_yield.csv"
+SOURCE_DATA_PATH = RAW_DATA_DIR / "crop_yield.csv"
+LEGACY_RUSSIAN_DATA_PATH = RAW_DATA_DIR / "russian_crop_yield_clean.csv"
+RUSSIAN_FERT_DATA_PATH = RAW_DATA_DIR / "russian_fert.csv"
+RUSSIAN_REAL_PROJECT_PATH = PROCESSED_DATA_DIR / "russian_fert_project.csv"
+
+DATASET_PATHS = {
+    "source": SOURCE_DATA_PATH,
+    "russian_legacy": LEGACY_RUSSIAN_DATA_PATH,
+    "russian_real_raw": RUSSIAN_FERT_DATA_PATH,
+    "russian_real_project": RUSSIAN_REAL_PROJECT_PATH,
+}
 
 MODELS_DIR = RESULTS_DIR / "models"
 METRICS_DIR = RESULTS_DIR / "metrics"
@@ -34,7 +46,7 @@ TRANSFORMER_CONFIG = {
 }
 
 AUTOENCODER_CONFIG = {
-    "latent_dim": 12,
+    "latent_dim": 18,
     "hidden_dim_1": 128,
     "hidden_dim_2": 64,
     "epochs": 8,
@@ -49,8 +61,11 @@ TRAIN_CONFIG = {
     "epochs": 8,
     "lr": 1e-3,
     "weight_decay": 1e-5,
-    "transform_components": 10,
+    "transform_components": 8,
     "num_workers": 0,
+    "huber_delta": 1.0,
+    "finetune_epochs": 8,
+    "finetune_lr": 5e-4,
 }
 
 BASELINE_CONFIG = {
@@ -68,8 +83,25 @@ BASELINE_CONFIG = {
     },
 }
 
+MODEL_TYPES = [
+    "transformer",
+    "mlp_resnet",
+]
+
+DEFAULT_MODEL_TYPE = "transformer"
+
+MLP_RESNET_CONFIG = {
+    "d_model": 128,
+    "hidden_dim": 256,
+    "num_blocks": 4,
+    "dropout": 0.15,
+    "head_hidden_dim": 64,
+}
+
 def ensure_project_dirs() -> None:
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    RAW_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    PROCESSED_DATA_DIR.mkdir(parents=True, exist_ok=True)
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     METRICS_DIR.mkdir(parents=True, exist_ok=True)
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
