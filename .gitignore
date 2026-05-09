@@ -24,7 +24,7 @@ data/reference/*
 !data/processed/.gitkeep
 
 results/
-models/
+src/archive_legacy/models/*
 
 # Models
 models/*.pkl

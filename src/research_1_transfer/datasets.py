@@ -77,3 +77,21 @@ def describe_stage1_datasets() -> dict[str, dict[str, Any]]:
         "source": summarize_dataframe(source_df, cfg["target_col"], cfg["crop_col"]),
         "target": summarize_dataframe(target_df, cfg["target_col"], cfg["crop_col"]),
     }
+
+def prepare_target_dataset_for_scratch() -> PreparedDataset:
+    cfg = RESEARCH_1_CONFIG
+    target_df = load_target_dataframe()
+    target_df = _drop_rare_crops(
+        target_df,
+        crop_col=cfg["crop_col"],
+        min_crop_count=int(cfg.get("min_crop_count", 10)),
+    )
+
+    return prepare_dataset(
+        df=target_df,
+        target_col=cfg["target_col"],
+        crop_col=cfg["crop_col"],
+        test_size=float(cfg.get("test_size", 0.2)),
+        random_state=RANDOM_STATE,
+        val_size_from_train=float(cfg.get("val_size_from_train", 0.2)),
+    )

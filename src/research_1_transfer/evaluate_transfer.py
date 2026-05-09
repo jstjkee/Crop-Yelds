@@ -6,6 +6,7 @@ import torch
 from src.core.config import MODEL_TYPES, RANDOM_STATE, ensure_project_dirs
 from src.core.data.target_scaler import TargetScaler
 from src.core.evaluation.metrics import build_metrics_row, regression_metrics, regression_metrics_by_crop
+from src.core.evaluation.reports import print_summary, reorder_summary_columns
 from src.core.training.dl_trainer import (
     get_device,
     load_model_from_checkpoint,
@@ -15,26 +16,39 @@ from src.core.training.dl_trainer import (
 )
 from src.research_1_transfer.config import RESEARCH_1_CONFIG
 from src.research_1_transfer.datasets import prepare_source_dataset, prepare_target_external
+from src.research_1_transfer.features import transform_with_feature_artifact
 
 
-def _checkpoint_path(model_type: str):
-    return RESEARCH_1_CONFIG["results"]["models"] / f"source_{model_type}.pt"
+def _checkpoint_path(model_type: str, feature_mode: str):
+    return RESEARCH_1_CONFIG["results"]["models"] / f"source_{model_type}_{feature_mode}.pt"
 
 
-def evaluate_one_model(model_type: str, prepared_source, external, device: str) -> dict:
+def evaluate_one_model(
+    model_type: str,
+    feature_mode: str,
+    prepared_source,
+    external,
+    device: str,
+) -> dict:
     if len(external["X"]) == 0:
         raise ValueError("После фильтрации не осталось строк для zero-shot transfer")
 
-    checkpoint_path = _checkpoint_path(model_type)
+    checkpoint_path = _checkpoint_path(model_type, feature_mode)
     if not checkpoint_path.exists():
         raise FileNotFoundError(f"Сначала обучи source-модель: {checkpoint_path}")
 
-    checkpoint = torch.load(checkpoint_path, map_location=device)
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     model = load_model_from_checkpoint(checkpoint=checkpoint, device=device)
     target_scaler = TargetScaler.from_dict(checkpoint["target_scaler"])
 
-    loader = make_loader(
+    X_external = transform_with_feature_artifact(
+        artifact=checkpoint["feature_artifact"],
         X=external["X"],
+        device=device,
+    )
+
+    loader = make_loader(
+        X=X_external,
         y=target_scaler.transform(external["y"]),
         crop_ids=external["crop_ids"],
         batch_size=256,
@@ -57,7 +71,7 @@ def evaluate_one_model(model_type: str, prepared_source, external, device: str) 
         id_to_crop=checkpoint["id_to_crop"],
     )
     by_crop_df.to_csv(
-        RESEARCH_1_CONFIG["results"]["tables"] / f"transfer_zero_shot_metrics_by_crop_{model_type}.csv",
+        RESEARCH_1_CONFIG["results"]["tables"] / f"transfer_zero_shot_metrics_by_crop_{model_type}_{feature_mode}.csv",
         index=False,
         encoding="utf-8-sig",
     )
@@ -67,14 +81,14 @@ def evaluate_one_model(model_type: str, prepared_source, external, device: str) 
     pred_df["y_pred"] = y_pred
     pred_df["abs_error"] = (pred_df["y_true"] - pred_df["y_pred"]).abs()
     pred_df.to_csv(
-        RESEARCH_1_CONFIG["results"]["tables"] / f"transfer_zero_shot_predictions_{model_type}.csv",
+        RESEARCH_1_CONFIG["results"]["tables"] / f"transfer_zero_shot_predictions_{model_type}_{feature_mode}.csv",
         index=False,
         encoding="utf-8-sig",
     )
 
     return build_metrics_row(
         model_name=model_type,
-        feature_mode="raw",
+        feature_mode=feature_mode,
         split_name="target_zero_shot",
         metrics=metrics,
         extra={
@@ -86,33 +100,41 @@ def evaluate_one_model(model_type: str, prepared_source, external, device: str) 
     )
 
 
-def main(models: list[str] | None = None) -> None:
+def main(
+    models: list[str] | None = None,
+    feature_modes: list[str] | None = None,
+) -> None:
     ensure_project_dirs()
     seed_everything(RANDOM_STATE)
     device = get_device()
     selected_models = models or list(RESEARCH_1_CONFIG.get("model_types", MODEL_TYPES))
+    selected_feature_modes = feature_modes or list(RESEARCH_1_CONFIG.get("feature_modes", ["raw"]))
 
     prepared_source = prepare_source_dataset()
     external = prepare_target_external(prepared_source)
 
     rows = []
-    for model_type in selected_models:
-        print("=" * 100)
-        print(f"Research 1 | zero-shot transfer | model={model_type} | device={device}")
-        rows.append(
-            evaluate_one_model(
-                model_type=model_type,
-                prepared_source=prepared_source,
-                external=external,
-                device=device,
+    for feature_mode in selected_feature_modes:
+        for model_type in selected_models:
+            print("=" * 100)
+            print(f"Research 1 | zero-shot transfer | model={model_type} | feature_mode={feature_mode} | device={device}")
+            rows.append(
+                evaluate_one_model(
+                    model_type=model_type,
+                    feature_mode=feature_mode,
+                    prepared_source=prepared_source,
+                    external=external,
+                    device=device,
+                )
             )
-        )
 
-    summary_df = pd.DataFrame(rows).sort_values("rmse").reset_index(drop=True)
+    summary_df = pd.DataFrame(rows).sort_values(["feature_mode", "rmse"]).reset_index(drop=True)
+    summary_df = reorder_summary_columns(summary_df)
+
     out_path = RESEARCH_1_CONFIG["results"]["metrics"] / "transfer_zero_shot_metrics.csv"
     summary_df.to_csv(out_path, index=False, encoding="utf-8-sig")
 
-    print(summary_df)
+    print_summary(summary_df)
     print(f"Saved: {out_path}")
 
 

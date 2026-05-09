@@ -1,9 +1,5 @@
 from __future__ import annotations
 
-import json
-from typing import Any
-
-import joblib
 import pandas as pd
 import torch
 import torch.nn as nn
@@ -28,11 +24,11 @@ from src.core.training.dl_trainer import (
     seed_everything,
 )
 from src.research_1_transfer.config import RESEARCH_1_CONFIG
-from src.research_1_transfer.datasets import describe_stage1_datasets, prepare_source_dataset
+from src.research_1_transfer.datasets import prepare_target_dataset_for_scratch
 from src.research_1_transfer.features import build_feature_view
 
 
-def _model_config(model_type: str) -> dict[str, Any]:
+def _model_config(model_type: str) -> dict:
     if model_type == "mlp_resnet":
         return MLP_RESNET_CONFIG
     if model_type == "transformer":
@@ -41,7 +37,7 @@ def _model_config(model_type: str) -> dict[str, Any]:
 
 
 def _checkpoint_path(model_type: str, feature_mode: str):
-    return RESEARCH_1_CONFIG["results"]["models"] / f"source_{model_type}_{feature_mode}.pt"
+    return RESEARCH_1_CONFIG["results"]["models"] / f"russia_scratch_{model_type}_{feature_mode}.pt"
 
 
 def train_one_model(
@@ -49,7 +45,7 @@ def train_one_model(
     feature_mode: str,
     prepared,
     device: str,
-) -> dict[str, Any]:
+) -> dict:
     cfg = RESEARCH_1_CONFIG
 
     feature_result = build_feature_view(
@@ -121,7 +117,7 @@ def train_one_model(
         epochs=int(cfg.get("epochs", TRAIN_CONFIG.get("epochs", 25))),
         patience=int(cfg.get("patience", TRAIN_CONFIG.get("patience", 8))),
         clip_grad_norm=float(TRAIN_CONFIG.get("clip_grad_norm", 2.0)),
-        verbose_prefix=f"[research_1][source][{model_type}][{feature_mode}] ",
+        verbose_prefix=f"[research_1][russia_scratch][{model_type}][{feature_mode}] ",
     )
 
     y_test_true, y_test_pred, crop_test = predict_unscaled(
@@ -162,8 +158,8 @@ def train_one_model(
             "crop_to_id": prepared.crop_to_id,
             "id_to_crop": prepared.id_to_crop,
             "target_scaler": target_scaler.to_dict(),
-            "research": "research_1_transfer",
-            "source_dataset_path": str(cfg["source_dataset_path"]),
+            "research": "research_1_russia_scratch",
+            "dataset_path": str(cfg["target_dataset_path"]),
             "target_col": cfg["target_col"],
             "crop_col": cfg["crop_col"],
             "random_state": RANDOM_STATE,
@@ -174,17 +170,17 @@ def train_one_model(
     )
 
     pd.DataFrame(history).to_csv(
-        cfg["results"]["metrics"] / f"source_history_{model_type}_{feature_mode}.csv",
+        cfg["results"]["metrics"] / f"russia_scratch_history_{model_type}_{feature_mode}.csv",
         index=False,
         encoding="utf-8-sig",
     )
     by_crop_df.to_csv(
-        cfg["results"]["tables"] / f"source_metrics_by_crop_{model_type}_{feature_mode}.csv",
+        cfg["results"]["tables"] / f"russia_scratch_metrics_by_crop_{model_type}_{feature_mode}.csv",
         index=False,
         encoding="utf-8-sig",
     )
     predictions_df.to_csv(
-        cfg["results"]["tables"] / f"source_predictions_{model_type}_{feature_mode}.csv",
+        cfg["results"]["tables"] / f"russia_scratch_predictions_{model_type}_{feature_mode}.csv",
         index=False,
         encoding="utf-8-sig",
     )
@@ -192,10 +188,10 @@ def train_one_model(
     return build_metrics_row(
         model_name=model_type,
         feature_mode=feature_mode,
-        split_name="source_test",
+        split_name="target_scratch_test",
         metrics=test_metrics,
         extra={
-            "dataset": "crop_yield_source",
+            "dataset": "russian_crop_yield_clean",
             "rows_train": int(len(prepared.train_df)),
             "rows_val": int(len(prepared.val_df)),
             "rows_test": int(len(prepared.test_df)),
@@ -216,25 +212,13 @@ def main(
 
     selected_models = models or list(cfg.get("model_types", MODEL_TYPES))
     selected_feature_modes = feature_modes or list(cfg.get("feature_modes", ["raw"]))
-
-    info = describe_stage1_datasets()
-    print(json.dumps(info["source"], ensure_ascii=False, indent=2))
-    print(json.dumps(info["target"], ensure_ascii=False, indent=2))
-
-    prepared = prepare_source_dataset()
-
-    joblib.dump(
-        prepared.preprocessor,
-        cfg["results"]["models"] / "source_preprocessor.joblib",
-    )
-    with open(cfg["results"]["models"] / "source_crop_mapping.json", "w", encoding="utf-8") as f:
-        json.dump(prepared.crop_to_id, f, ensure_ascii=False, indent=2)
+    prepared = prepare_target_dataset_for_scratch()
 
     rows = []
     for feature_mode in selected_feature_modes:
         for model_type in selected_models:
             print("=" * 100)
-            print(f"Research 1 | train source | model={model_type} | feature_mode={feature_mode} | device={device}")
+            print(f"Research 1 | train Russia from scratch | model={model_type} | feature_mode={feature_mode} | device={device}")
             rows.append(
                 train_one_model(
                     model_type=model_type,
@@ -247,7 +231,7 @@ def main(
     summary_df = pd.DataFrame(rows).sort_values(["feature_mode", "rmse"]).reset_index(drop=True)
     summary_df = reorder_summary_columns(summary_df)
 
-    out_path = cfg["results"]["metrics"] / "source_training_metrics.csv"
+    out_path = cfg["results"]["metrics"] / "russia_scratch_metrics.csv"
     summary_df.to_csv(out_path, index=False, encoding="utf-8-sig")
 
     print_summary(summary_df)
