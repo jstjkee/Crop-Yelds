@@ -19,6 +19,7 @@ venv/
 # Data
 data/raw/*
 data/processed/*
+data/reference/*
 !data/raw/.gitkeep
 !data/processed/.gitkeep
 

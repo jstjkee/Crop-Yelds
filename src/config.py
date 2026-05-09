@@ -11,12 +11,14 @@ SOURCE_DATA_PATH = RAW_DATA_DIR / "crop_yield.csv"
 LEGACY_RUSSIAN_DATA_PATH = RAW_DATA_DIR / "russian_crop_yield_clean.csv"
 RUSSIAN_FERT_DATA_PATH = RAW_DATA_DIR / "russian_fert.csv"
 RUSSIAN_REAL_PROJECT_PATH = PROCESSED_DATA_DIR / "russian_fert_project.csv"
+RUSSIAN_FINAL_CLEANED_PATH = PROCESSED_DATA_DIR / "russian_final_cleaned.csv"
 
 DATASET_PATHS = {
     "source": SOURCE_DATA_PATH,
     "russian_legacy": LEGACY_RUSSIAN_DATA_PATH,
     "russian_real_raw": RUSSIAN_FERT_DATA_PATH,
     "russian_real_project": RUSSIAN_REAL_PROJECT_PATH,
+    "russian_final_cleaned": RUSSIAN_FINAL_CLEANED_PATH,
 }
 
 MODELS_DIR = RESULTS_DIR / "models"
@@ -97,6 +99,50 @@ MLP_RESNET_CONFIG = {
     "dropout": 0.15,
     "head_hidden_dim": 64,
 }
+
+RUSSIAN_FINAL_CONFIG = {
+    "dataset_path": RUSSIAN_FINAL_CLEANED_PATH,
+    "target_col": "target_yield_centner_per_ha",
+    "crop_col": "crop",
+    "dataset_label": "russian_final_cleaned",
+    "results_prefix": "russian_final_cleaned",
+
+    "feature_mode": "raw",
+
+    "model_types": ["mlp_resnet", "transformer"],
+
+    "split": "random",
+
+    "test_size": 0.2,
+    "val_size_from_train": 0.2,
+
+    "test_years": 2,
+    "val_years": 1,
+
+    "min_crop_count": 10,
+
+    "exclude_cols": [
+        "gross_harvest",
+    ],
+
+    "zero_fill_cols": [
+        "mineral_fertilizers_centner",
+        "mineral_fertilizers_tons",
+        "mineral_fertilizers_cumulative_centner",
+        "fertilizer_municipality_count",
+        "fertilizer_records_count",
+        "valid_fertilizer_values_count",
+        "agricultural_machinery_total_count",
+    ],
+
+   "use_log_target": True,
+
+    "balanced_sampler": True,
+
+    "epochs": 20,
+    "patience": 6,
+}
+
 
 def ensure_project_dirs() -> None:
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
