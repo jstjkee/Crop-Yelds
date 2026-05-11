@@ -7,6 +7,7 @@ def reorder_summary_columns(df: pd.DataFrame) -> pd.DataFrame:
     preferred = [
         "model",
         "feature_mode",
+        "feature_set",
         "split",
         "dataset",
         "mae",
@@ -16,10 +17,7 @@ def reorder_summary_columns(df: pd.DataFrame) -> pd.DataFrame:
         "rows_train",
         "rows_val",
         "rows_test",
-        "num_rows",
-        "num_rows_test",
         "num_crops",
-        "num_known_crops",
     ]
 
     path_cols = [c for c in df.columns if "path" in c.lower()]
@@ -32,21 +30,19 @@ def reorder_summary_columns(df: pd.DataFrame) -> pd.DataFrame:
 def visible_summary_columns(df: pd.DataFrame) -> list[str]:
     return [
         c for c in [
-            "model",
-            "feature_mode",
-            "split",
-            "dataset",
-            "mae",
-            "mse",
-            "rmse",
-            "r2",
-            "rows_train",
-            "rows_val",
-            "rows_test",
-            "num_rows",
-            "num_rows_test",
-            "num_crops",
-            "num_known_crops",
+        "model",
+        "feature_mode",
+        "feature_set",
+        "split",
+        "dataset",
+        "mae",
+        "mse",
+        "rmse",
+        "r2",
+        "rows_train",
+        "rows_val",
+        "rows_test",
+        "num_crops",
         ]
         if c in df.columns
     ]

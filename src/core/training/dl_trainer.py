@@ -7,13 +7,15 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset, WeightedRandomSampler
-
+from src.core.config import MLP_RESNET_CONFIG, TRANSFORMER_CONFIG, WIDE_DEEP_CONFIG
+from src.core.models.wide_deep_multihead import build_multihead_wide_deep
 from src.core.config import MLP_RESNET_CONFIG, TRANSFORMER_CONFIG
 from src.core.data.target_scaler import TargetScaler
 from src.core.evaluation.metrics import regression_metrics
 from src.core.models.mlp_resnet_multihead import build_multihead_mlp_resnet
 from src.core.models.multihead_transformer import build_multihead_transformer
-
+from src.core.config import MLP_RESNET_CONFIG, TRANSFORMER_CONFIG, TAB_MLP_CONFIG
+from src.core.models.tab_mlp_multihead import build_multihead_tab_mlp
 
 class YieldDataset(Dataset):
     def __init__(self, X: np.ndarray, y: np.ndarray, crop_ids: np.ndarray) -> None:
@@ -57,6 +59,20 @@ def build_model(
             input_dim=input_dim,
             num_crops=num_crops,
             config=model_config or TRANSFORMER_CONFIG,
+        )
+
+    if model_type == "wide_deep":
+        return build_multihead_wide_deep(
+            input_dim=input_dim,
+            num_crops=num_crops,
+            config=model_config or WIDE_DEEP_CONFIG,
+        )
+    
+    if model_type == "tab_mlp":
+        return build_multihead_tab_mlp(
+            input_dim=input_dim,
+            num_crops=num_crops,
+            config=model_config or TAB_MLP_CONFIG,
         )
 
     raise ValueError(f"Неизвестный model_type: {model_type}")

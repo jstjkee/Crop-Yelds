@@ -2,10 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
-# -----------------------------------------------------------------------------
 # ROOT PATHS
-# -----------------------------------------------------------------------------
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 SRC_DIR = PROJECT_ROOT / "src"
@@ -17,10 +14,7 @@ RAW_DATA_DIR = DATA_DIR / "raw"
 INTERIM_DATA_DIR = DATA_DIR / "interim"
 PROCESSED_DATA_DIR = DATA_DIR / "processed"
 
-
-# -----------------------------------------------------------------------------
 # RESULTS PATHS
-# -----------------------------------------------------------------------------
 RESULTS_RESEARCH_1_DIR = RESULTS_DIR / "research_1"
 RESULTS_RESEARCH_2_DIR = RESULTS_DIR / "research_2"
 RESULTS_RESEARCH_3_DIR = RESULTS_DIR / "research_3"
@@ -40,10 +34,7 @@ RESEARCH_1_RESULTS = build_results_dirs(RESULTS_RESEARCH_1_DIR)
 RESEARCH_2_RESULTS = build_results_dirs(RESULTS_RESEARCH_2_DIR)
 RESEARCH_3_RESULTS = build_results_dirs(RESULTS_RESEARCH_3_DIR)
 
-
-# -----------------------------------------------------------------------------
 # GLOBAL TRAIN SETTINGS
-# -----------------------------------------------------------------------------
 RANDOM_STATE = 42
 
 TRAIN_CONFIG = {
@@ -57,10 +48,7 @@ TRAIN_CONFIG = {
     "clip_grad_norm": 2.0,
 }
 
-
-# -----------------------------------------------------------------------------
 # MODEL CONFIGS
-# -----------------------------------------------------------------------------
 MLP_RESNET_CONFIG = {
     "d_model": 64,
     "hidden_dim": 128,
@@ -77,10 +65,7 @@ TRANSFORMER_CONFIG = {
     "dropout": 0.10,
 }
 
-
-# -----------------------------------------------------------------------------
 # HELPERS
-# -----------------------------------------------------------------------------
 def ensure_project_dirs() -> None:
     dirs = [
         RAW_DATA_DIR,

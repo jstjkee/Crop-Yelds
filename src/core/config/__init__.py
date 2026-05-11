@@ -58,8 +58,20 @@ TRANSFORMER_CONFIG = {
     "dropout": 0.10,
 }
 
-MODEL_TYPES = ["mlp_resnet", "transformer"]
+WIDE_DEEP_CONFIG = {
+    "deep_hidden_dim": 64,
+    "deep_num_layers": 2,
+    "deep_dropout": 0.25,
+    "head_hidden_dim": 32,
+}
 
+TAB_MLP_CONFIG = {
+    "hidden_dims": [128, 64, 32],
+    "dropout": 0.20,
+    "head_hidden_dim": 32,
+}
+
+MODEL_TYPES = ["mlp_resnet", "transformer", "wide_deep", "tab_mlp"]
 
 def ensure_project_dirs() -> None:
     dirs = [

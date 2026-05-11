@@ -10,7 +10,7 @@ RESEARCH_1_CONFIG = {
     "target_col": "Yield_tons_per_hectare",
     "crop_col": "Crop",
 
-    "model_types": ["mlp_resnet", "transformer"],
+    "model_types": ["mlp_resnet", "transformer", "wide_deep"],
     "feature_modes": ["raw", "pca", "autoencoder"],
 
     "test_size": 0.2,
