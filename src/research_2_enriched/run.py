@@ -4,7 +4,6 @@ import argparse
 
 from src.research_2_enriched.compare_feature_sets import main as compare_main
 from src.research_2_enriched.config import RESEARCH_2_CONFIG
-from src.research_2_enriched.eda_dataset import main as eda_main
 from src.research_2_enriched.train_enriched import main as train_main
 
 
@@ -13,7 +12,7 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument(
         "command",
-        choices=["train", "compare", "eda", "all"],
+        choices=["train", "compare", "all"],
         help="Какой сценарий запустить",
     )
 
@@ -33,26 +32,46 @@ def parse_args() -> argparse.Namespace:
         help="Какие feature modes запускать",
     )
 
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Один конкретный seed для запуска",
+    )
+
+    parser.add_argument(
+        "--seed-list",
+        nargs="+",
+        type=int,
+        default=None,
+        help="Список seed для серии запусков, например: --seed-list 42 52 62",
+    )
+
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
 
-    if args.command == "eda":
-        eda_main()
-        return
-
     if args.command == "train":
-        train_main(models=args.models, feature_modes=args.feature_modes)
+        train_main(
+            models=args.models,
+            feature_modes=args.feature_modes,
+            seed=args.seed,
+            seed_list=args.seed_list,
+        )
         return
 
     if args.command == "compare":
         compare_main()
         return
 
-    eda_main()
-    train_main(models=args.models, feature_modes=args.feature_modes)
+    train_main(
+        models=args.models,
+        feature_modes=args.feature_modes,
+        seed=args.seed,
+        seed_list=args.seed_list,
+    )
     compare_main()
 
 

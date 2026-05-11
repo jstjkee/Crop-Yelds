@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from src.core.config import INTERIM_DATA_DIR, PROCESSED_DATA_DIR, RESEARCH_2_RESULTS
+from src.core.config import INTERIM_DATA_DIR, PROCESSED_DATA_DIR, RESEARCH_3_RESULTS
 
 
-RESEARCH_2_CONFIG = {
-    "name": "research_2_enriched",
+RESEARCH_3_CONFIG = {
+    "name": "research_3_forecast",
 
     "base_dataset_path": INTERIM_DATA_DIR / "research_2" / "rosstat_agro_full.csv",
     "final_dataset_path": PROCESSED_DATA_DIR / "research_2" / "russian_final_cleaned.csv",
@@ -13,13 +13,9 @@ RESEARCH_2_CONFIG = {
     "crop_col": "crop",
     "year_col": "year",
 
-    "model_types": ["mlp_resnet", "transformer", "wide_deep", "tab_mlp"],
+    "model_types": ["mlp_resnet"],
     "feature_modes": ["raw"],
-
     "splits": ["year"],
-
-    "test_size": 0.2,
-    "val_size_from_train": 0.2,
 
     "train_years_range": [2000, 2016],
     "val_years_range": [2017, 2020],
@@ -27,17 +23,18 @@ RESEARCH_2_CONFIG = {
 
     "min_crop_count": 10,
 
+    # Лучший набор исключений из research 2
     "exclude_cols": [
-    "gross_harvest",
-    "mineral_fertilizers_cumulative_centner",
-    "season_temp_mean",
-    "season_temp_max",
-    "season_temp_min",
-    "season_precip_sum",
-    "season_rain_sum",
-    "season_humidity_mean",
-    "season_hot_days",
-    "season_dry_days",
+        "gross_harvest",
+        "mineral_fertilizers_cumulative_centner",
+        "season_temp_mean",
+        "season_temp_max",
+        "season_temp_min",
+        "season_precip_sum",
+        "season_rain_sum",
+        "season_humidity_mean",
+        "season_hot_days",
+        "season_dry_days",
     ],
 
     "zero_fill_all_nulls": False,
@@ -45,9 +42,10 @@ RESEARCH_2_CONFIG = {
     "use_log_target": True,
     "balanced_sampler": True,
 
-    "feature_sets": [
-        "full",
-    ],
+    "epochs": 40,
+    "patience": 10,
+
+    "feature_sets": ["full"],
 
     "feature_group_keywords": {
         "weather": [
@@ -82,29 +80,17 @@ RESEARCH_2_CONFIG = {
         "full": ["weather", "fertilizers", "machinery"],
     },
 
-    "quantile_clip_enabled": False,
-    "quantile_clip_low": 0.005,
-    "quantile_clip_high": 0.995,
-
-    "log1p_fert_mach_enabled": False,
-
-    "fert_mach_clip_cols": [
-        "mineral_fertilizers_centner",
-        "mineral_fertilizers_tons",
-        "agricultural_machinery_total_count",
-        "tractors_count",
-        "grain_harvesters_count",
-        "forage_harvesters_count",
-        "potato_harvesters_count",
-        "corn_harvesters_count",
-        "beet_harvesters_count",
-    ],
-
+    # Лаги — оставляем как в лучшем research 2
     "use_yield_history_features": True,
     "yield_history_group_cols": ["region", "crop"],
     "yield_lags": [1, 2, 3],
     "yield_roll_windows": [3],
 
+    "weather_month_cutoff": 9,
+
+    "quality_threshold_r2": 0.90,
+    "quality_threshold_rmse": 17.0,
+
     "dataset_label": "russian_final_cleaned",
-    "results": RESEARCH_2_RESULTS,
+    "results": RESEARCH_3_RESULTS,
 }

@@ -12,12 +12,12 @@ from src.core.config import (
     MLP_RESNET_CONFIG,
     MODEL_TYPES,
     RANDOM_STATE,
+    TAB_MLP_CONFIG,
     TRAIN_CONFIG,
     TRANSFORMER_CONFIG,
     WIDE_DEEP_CONFIG,
     ensure_project_dirs,
 )
-
 from src.core.data.target_scaler import TargetScaler
 from src.core.evaluation.metrics import build_metrics_row, regression_metrics, regression_metrics_by_crop
 from src.core.evaluation.reports import print_summary, reorder_summary_columns
@@ -28,15 +28,6 @@ from src.core.training.dl_trainer import (
     make_loader,
     predict_unscaled,
     seed_everything,
-)
-from src.core.config import (
-    MLP_RESNET_CONFIG,
-    MODEL_TYPES,
-    RANDOM_STATE,
-    TAB_MLP_CONFIG,
-    TRAIN_CONFIG,
-    TRANSFORMER_CONFIG,
-    ensure_project_dirs,
 )
 from src.research_2_enriched.build_dataset import (
     describe_research_2_dataset,
@@ -57,16 +48,86 @@ def _model_config(model_type: str) -> dict[str, Any]:
     raise ValueError(f"Неизвестный model_type: {model_type}")
 
 
+def _seed_suffix(seed: int) -> str:
+    return f"_seed{seed}"
+
+
 def _checkpoint_path(
     split_name: str,
     feature_set_name: str,
     model_type: str,
     feature_mode: str,
+    seed: int,
 ):
     return (
         RESEARCH_2_CONFIG["results"]["models"]
-        / f"research_2_{split_name}_{feature_set_name}_{model_type}_{feature_mode}.pt"
+        / f"research_2_{split_name}_{feature_set_name}_{model_type}_{feature_mode}{_seed_suffix(seed)}.pt"
     )
+
+
+def _normalize_seeds(
+    seed: int | None,
+    seed_list: list[int] | None,
+) -> list[int]:
+    if seed_list:
+        normalized = []
+        seen = set()
+        for s in seed_list:
+            s = int(s)
+            if s not in seen:
+                normalized.append(s)
+                seen.add(s)
+        return normalized
+
+    if seed is not None:
+        return [int(seed)]
+
+    return [int(RANDOM_STATE)]
+
+
+def _aggregate_seed_results(summary_df: pd.DataFrame) -> pd.DataFrame:
+    if summary_df.empty or "seed" not in summary_df.columns:
+        return pd.DataFrame()
+
+    group_cols = [
+        c for c in [
+            "model",
+            "feature_mode",
+            "feature_set",
+            "split",
+            "dataset",
+            "rows_train",
+            "rows_val",
+            "rows_test",
+            "num_crops",
+            "input_dim",
+        ]
+        if c in summary_df.columns
+    ]
+
+    agg_df = (
+        summary_df
+        .groupby(group_cols, dropna=False)
+        .agg(
+            n_seeds=("seed", "nunique"),
+            seed_list=("seed", lambda s: ",".join(map(str, sorted(pd.unique(s).tolist())))),
+            mae_mean=("mae", "mean"),
+            mae_std=("mae", "std"),
+            mse_mean=("mse", "mean"),
+            mse_std=("mse", "std"),
+            rmse_mean=("rmse", "mean"),
+            rmse_std=("rmse", "std"),
+            r2_mean=("r2", "mean"),
+            r2_std=("r2", "std"),
+        )
+        .reset_index()
+    )
+
+    for col in ["mae_std", "mse_std", "rmse_std", "r2_std"]:
+        if col in agg_df.columns:
+            agg_df[col] = agg_df[col].fillna(0.0)
+
+    return agg_df
 
 
 def train_one_model(
@@ -76,11 +137,14 @@ def train_one_model(
     feature_mode: str,
     prepared,
     device: str,
+    seed: int,
 ) -> dict[str, Any]:
     cfg = RESEARCH_2_CONFIG
 
     if feature_mode != "raw":
         raise ValueError("В Research 2 пока поддерживается только feature_mode='raw'")
+
+    seed_everything(seed)
 
     target_scaler = TargetScaler.fit(
         prepared.y_train,
@@ -147,7 +211,8 @@ def train_one_model(
         clip_grad_norm=float(TRAIN_CONFIG.get("clip_grad_norm", 2.0)),
         verbose_prefix=(
             f"[research_2][{split_name}][{feature_set_name}]"
-            f"[enriched][{model_type}][{feature_mode}] "
+            f"[enriched][{model_type}][{feature_mode}]"
+            f"[seed={seed}] "
         ),
     )
 
@@ -177,6 +242,7 @@ def train_one_model(
         feature_set_name=feature_set_name,
         model_type=model_type,
         feature_mode=feature_mode,
+        seed=seed,
     )
 
     torch.save(
@@ -197,29 +263,31 @@ def train_one_model(
             "dataset_path": str(cfg["final_dataset_path"]),
             "target_col": cfg["target_col"],
             "crop_col": cfg["crop_col"],
-            "random_state": RANDOM_STATE,
+            "random_state": seed,
             "split": split_name,
         },
         checkpoint_path,
     )
 
+    seed_suffix = _seed_suffix(seed)
+
     pd.DataFrame(history).to_csv(
         cfg["results"]["metrics"]
-        / f"research_2_history_{split_name}_{feature_set_name}_{model_type}_{feature_mode}.csv",
+        / f"research_2_history_{split_name}_{feature_set_name}_{model_type}_{feature_mode}{seed_suffix}.csv",
         index=False,
         encoding="utf-8-sig",
     )
 
     by_crop_df.to_csv(
         cfg["results"]["tables"]
-        / f"research_2_metrics_by_crop_{split_name}_{feature_set_name}_{model_type}_{feature_mode}.csv",
+        / f"research_2_metrics_by_crop_{split_name}_{feature_set_name}_{model_type}_{feature_mode}{seed_suffix}.csv",
         index=False,
         encoding="utf-8-sig",
     )
 
     predictions_df.to_csv(
         cfg["results"]["tables"]
-        / f"research_2_predictions_{split_name}_{feature_set_name}_{model_type}_{feature_mode}.csv",
+        / f"research_2_predictions_{split_name}_{feature_set_name}_{model_type}_{feature_mode}{seed_suffix}.csv",
         index=False,
         encoding="utf-8-sig",
     )
@@ -232,6 +300,7 @@ def train_one_model(
         extra={
             "dataset": cfg["dataset_label"],
             "feature_set": feature_set_name,
+            "seed": seed,
             "rows_train": int(len(prepared.train_df)),
             "rows_val": int(len(prepared.val_df)),
             "rows_test": int(len(prepared.test_df)),
@@ -245,9 +314,10 @@ def train_one_model(
 def main(
     models: list[str] | None = None,
     feature_modes: list[str] | None = None,
+    seed: int | None = None,
+    seed_list: list[int] | None = None,
 ) -> None:
     ensure_project_dirs()
-    seed_everything(RANDOM_STATE)
 
     cfg = RESEARCH_2_CONFIG
     device = get_device()
@@ -256,64 +326,89 @@ def main(
     selected_feature_modes = feature_modes or list(cfg.get("feature_modes", ["raw"]))
     selected_splits = list(cfg.get("splits", ["random"]))
     selected_feature_sets = list(cfg.get("feature_sets", ["full"]))
+    selected_seeds = _normalize_seeds(seed=seed, seed_list=seed_list)
+
+    print(f"[research_2] selected seeds: {selected_seeds}")
 
     info = describe_research_2_dataset()
     print(json.dumps(info, ensure_ascii=False, indent=2))
 
     rows = []
 
-    for split_name in selected_splits:
-        for feature_set_name in selected_feature_sets:
-            prepared = prepare_enriched_dataset(
-                split_name=split_name,
-                feature_set_name=feature_set_name,
-            )
+    for current_seed in selected_seeds:
+        seed_everything(current_seed)
 
-            joblib.dump(
-                prepared.preprocessor,
-                cfg["results"]["models"]
-                / f"research_2_preprocessor_{split_name}_{feature_set_name}.joblib",
-            )
+        for split_name in selected_splits:
+            for feature_set_name in selected_feature_sets:
+                prepared = prepare_enriched_dataset(
+                    split_name=split_name,
+                    feature_set_name=feature_set_name,
+                )
 
-            with open(
-                cfg["results"]["models"]
-                / f"research_2_crop_mapping_{split_name}_{feature_set_name}.json",
-                "w",
-                encoding="utf-8",
-            ) as f:
-                json.dump(prepared.crop_to_id, f, ensure_ascii=False, indent=2)
+                joblib.dump(
+                    prepared.preprocessor,
+                    cfg["results"]["models"]
+                    / f"research_2_preprocessor_{split_name}_{feature_set_name}.joblib",
+                )
 
-            for feature_mode in selected_feature_modes:
-                for model_type in selected_models:
-                    print("=" * 100)
-                    print(
-                        f"Research 2 | train enriched | "
-                        f"split={split_name} | feature_set={feature_set_name} | "
-                        f"model={model_type} | feature_mode={feature_mode} | device={device}"
-                    )
+                with open(
+                    cfg["results"]["models"]
+                    / f"research_2_crop_mapping_{split_name}_{feature_set_name}.json",
+                    "w",
+                    encoding="utf-8",
+                ) as f:
+                    json.dump(prepared.crop_to_id, f, ensure_ascii=False, indent=2)
 
-                    rows.append(
-                        train_one_model(
-                            split_name=split_name,
-                            feature_set_name=feature_set_name,
-                            model_type=model_type,
-                            feature_mode=feature_mode,
-                            prepared=prepared,
-                            device=device,
+                for feature_mode in selected_feature_modes:
+                    for model_type in selected_models:
+                        print("=" * 100)
+                        print(
+                            f"Research 2 | train enriched | "
+                            f"split={split_name} | feature_set={feature_set_name} | "
+                            f"model={model_type} | feature_mode={feature_mode} | "
+                            f"seed={current_seed} | device={device}"
                         )
-                    )
+
+                        rows.append(
+                            train_one_model(
+                                split_name=split_name,
+                                feature_set_name=feature_set_name,
+                                model_type=model_type,
+                                feature_mode=feature_mode,
+                                prepared=prepared,
+                                device=device,
+                                seed=current_seed,
+                            )
+                        )
 
     summary_df = pd.DataFrame(rows).sort_values(
-        ["split", "feature_set", "feature_mode", "rmse"]
+        ["split", "feature_set", "feature_mode", "model", "seed"]
     ).reset_index(drop=True)
 
     summary_df = reorder_summary_columns(summary_df)
 
-    out_path = cfg["results"]["metrics"] / "research_2_enriched_metrics.csv"
-    summary_df.to_csv(out_path, index=False, encoding="utf-8-sig")
+    raw_out_path = cfg["results"]["metrics"] / "research_2_enriched_metrics_by_seed.csv"
+    summary_df.to_csv(raw_out_path, index=False, encoding="utf-8-sig")
 
+    print("\n[research_2] raw per-seed results")
     print_summary(summary_df)
-    print(f"Saved: {out_path}")
+    print(f"Saved: {raw_out_path}")
+
+    if len(selected_seeds) == 1:
+        single_out_path = cfg["results"]["metrics"] / "research_2_enriched_metrics.csv"
+        summary_df.to_csv(single_out_path, index=False, encoding="utf-8-sig")
+        print(f"Saved: {single_out_path}")
+        return
+
+    agg_df = _aggregate_seed_results(summary_df)
+    agg_df = reorder_summary_columns(agg_df)
+
+    agg_out_path = cfg["results"]["metrics"] / "research_2_enriched_metrics_seed_agg.csv"
+    agg_df.to_csv(agg_out_path, index=False, encoding="utf-8-sig")
+
+    print("\n[research_2] aggregated seed results")
+    print_summary(agg_df)
+    print(f"Saved: {agg_out_path}")
 
 
 if __name__ == "__main__":

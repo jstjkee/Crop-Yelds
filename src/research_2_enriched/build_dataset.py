@@ -71,7 +71,27 @@ def clean_enriched_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     df = df[df[crop_col].astype(str).str.strip() != ""]
     df = df[df[target_col] >= 0]
 
-    # Явно выбрасываем мусорные выбросы
+    suspicious_numeric_cols = [
+        "agricultural_machinery_total_count",
+        "tractors_count",
+        "grain_harvesters_count",
+        "forage_harvesters_count",
+        "potato_harvesters_count",
+        "corn_harvesters_count",
+        "beet_harvesters_count",
+        "mineral_fertilizers_centner",
+        "mineral_fertilizers_tons",
+        "mineral_fertilizers_cumulative_centner",
+        "fertilizer_municipality_count",
+        "fertilizer_records_count",
+        "valid_fertilizer_values_count",
+        "sown_area",
+    ]
+
+    for col in suspicious_numeric_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
     suspicious_upper_bounds = {
         "agricultural_machinery_total_count": 1_000_000,
         "tractors_count": 1_000_000,
@@ -88,7 +108,6 @@ def clean_enriched_dataframe(df: pd.DataFrame) -> pd.DataFrame:
         if col not in df.columns:
             continue
 
-        df[col] = pd.to_numeric(df[col], errors="coerce")
         bad_mask = df[col] > upper_bound
         bad_count = int(bad_mask.sum())
 
@@ -98,7 +117,7 @@ def clean_enriched_dataframe(df: pd.DataFrame) -> pd.DataFrame:
             )
             df.loc[bad_mask, col] = np.nan
 
-    if bool(cfg.get("zero_fill_all_nulls", True)):
+    if bool(cfg.get("zero_fill_all_nulls", False)):
         df = df.fillna(0)
 
     counts = df[crop_col].astype(str).value_counts()
@@ -106,6 +125,85 @@ def clean_enriched_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     df = df[df[crop_col].astype(str).isin(keep_crops)]
 
     return df.reset_index(drop=True)
+
+def add_yield_history_features(df: pd.DataFrame) -> pd.DataFrame:
+    cfg = RESEARCH_2_CONFIG
+    target_col = cfg["target_col"]
+    year_col = cfg["year_col"]
+
+    if not bool(cfg.get("use_yield_history_features", False)):
+        return df
+
+    group_cols = list(cfg.get("yield_history_group_cols", ["region", "crop"]))
+    lag_steps = list(cfg.get("yield_lags", [1, 2, 3]))
+    roll_windows = list(cfg.get("yield_roll_windows", [3]))
+
+    required_cols = [*group_cols, year_col, target_col]
+    missing_required = [c for c in required_cols if c not in df.columns]
+    if missing_required:
+        raise ValueError(
+            f"Для yield history features не хватает колонок: {missing_required}"
+        )
+
+    df = df.copy()
+    df[year_col] = pd.to_numeric(df[year_col], errors="coerce")
+
+    df = df.sort_values(group_cols + [year_col]).reset_index(drop=True)
+
+    grouped = df.groupby(group_cols, sort=False)[target_col]
+
+    # Простые лаги
+    for lag in lag_steps:
+        df[f"yield_lag_{lag}"] = grouped.shift(lag)
+
+    # Rolling mean / std только по прошлым значениям
+    for window in roll_windows:
+        shifted = grouped.shift(1)
+
+        df[f"yield_roll_mean_{window}"] = (
+            shifted.groupby([df[c] for c in group_cols], sort=False)
+            .rolling(window=window, min_periods=1)
+            .mean()
+            .reset_index(level=list(range(len(group_cols))), drop=True)
+        )
+
+        df[f"yield_roll_std_{window}"] = (
+            shifted.groupby([df[c] for c in group_cols], sort=False)
+            .rolling(window=window, min_periods=2)
+            .std()
+            .reset_index(level=list(range(len(group_cols))), drop=True)
+        )
+
+    # Простая динамика
+    if "yield_lag_1" in df.columns and "yield_lag_2" in df.columns:
+        df["yield_growth_1"] = df["yield_lag_1"] - df["yield_lag_2"]
+
+    return df
+
+def add_missing_indicators(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+
+    cols_for_missing_flags = [
+        "mineral_fertilizers_centner",
+        "mineral_fertilizers_tons",
+        "fertilizer_municipality_count",
+        "fertilizer_records_count",
+        "valid_fertilizer_values_count",
+        "agricultural_machinery_total_count",
+        "tractors_count",
+        "grain_harvesters_count",
+        "forage_harvesters_count",
+        "potato_harvesters_count",
+        "corn_harvesters_count",
+        "beet_harvesters_count",
+        "sown_area",
+    ]
+
+    for col in cols_for_missing_flags:
+        if col in df.columns:
+            df[f"{col}_was_missing"] = df[col].isna().astype(int)
+
+    return df
 
 
 def split_random(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
@@ -216,7 +314,6 @@ def filter_feature_columns_by_set(
 
                 break
 
-        # base-признаки — всё, что не попало в weather/fertilizers/machinery
         if not is_group_col:
             result_cols.append(col)
 
@@ -238,6 +335,57 @@ def filter_feature_columns_by_set(
     print("=" * 100)
 
     return result_cols
+
+
+def apply_train_fitted_quantile_clip_and_log(
+    train_df: pd.DataFrame,
+    val_df: pd.DataFrame,
+    test_df: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    cfg = RESEARCH_2_CONFIG
+
+    train_df = train_df.copy()
+    val_df = val_df.copy()
+    test_df = test_df.copy()
+
+    cols = [c for c in cfg.get("fert_mach_clip_cols", []) if c in train_df.columns]
+    clip_enabled = bool(cfg.get("quantile_clip_enabled", False))
+    low_q = float(cfg.get("quantile_clip_low", 0.005))
+    high_q = float(cfg.get("quantile_clip_high", 0.995))
+    log_enabled = bool(cfg.get("log1p_fert_mach_enabled", False))
+
+    for col in cols:
+        train_df[col] = pd.to_numeric(train_df[col], errors="coerce")
+        val_df[col] = pd.to_numeric(val_df[col], errors="coerce")
+        test_df[col] = pd.to_numeric(test_df[col], errors="coerce")
+
+        if clip_enabled:
+            lower = train_df[col].quantile(low_q)
+            upper = train_df[col].quantile(high_q)
+
+            if pd.notna(lower) and pd.notna(upper):
+                train_df[col] = train_df[col].clip(lower=lower, upper=upper)
+                val_df[col] = val_df[col].clip(lower=lower, upper=upper)
+                test_df[col] = test_df[col].clip(lower=lower, upper=upper)
+
+                print(
+                    f"[research_2][clip] {col}: "
+                    f"train q{low_q:.3f}={lower:.4f}, q{high_q:.3f}={upper:.4f}"
+                )
+
+        if log_enabled:
+            # На всякий случай не даём уйти в отрицательные
+            train_df[col] = train_df[col].clip(lower=0)
+            val_df[col] = val_df[col].clip(lower=0)
+            test_df[col] = test_df[col].clip(lower=0)
+
+            train_df[col] = np.log1p(train_df[col])
+            val_df[col] = np.log1p(val_df[col])
+            test_df[col] = np.log1p(test_df[col])
+
+            print(f"[research_2][log1p] {col}")
+
+    return train_df, val_df, test_df
 
 
 def build_preprocessor(
@@ -274,10 +422,14 @@ def build_preprocessor(
         c for c in numeric_cols
         if _column_belongs_to_group(c, "weather")
     ]
+
     fert_mach_numeric_cols = [
         c for c in numeric_cols
-        if _column_belongs_to_group(c, "fertilizers") or _column_belongs_to_group(c, "machinery")
+        if _column_belongs_to_group(c, "fertilizers")
+        or _column_belongs_to_group(c, "machinery")
+        or c.endswith("_was_missing")
     ]
+
     other_numeric_cols = [
         c for c in numeric_cols
         if c not in weather_numeric_cols and c not in fert_mach_numeric_cols
@@ -357,6 +509,8 @@ def prepare_enriched_dataset(
 
     df = load_enriched_dataframe()
     df = clean_enriched_dataframe(df)
+    df = add_yield_history_features(df)
+    df = add_missing_indicators(df)
 
     if split_name == "year":
         train_df, val_df, test_df = split_by_year(df)
@@ -364,6 +518,12 @@ def prepare_enriched_dataset(
         train_df, val_df, test_df = split_random(df)
     else:
         raise ValueError(f"Неизвестный split_name: {split_name}")
+
+    train_df, val_df, test_df = apply_train_fitted_quantile_clip_and_log(
+        train_df=train_df,
+        val_df=val_df,
+        test_df=test_df,
+    )
 
     crop_col = cfg["crop_col"]
     target_col = cfg["target_col"]

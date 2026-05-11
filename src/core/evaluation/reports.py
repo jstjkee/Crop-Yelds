@@ -10,14 +10,24 @@ def reorder_summary_columns(df: pd.DataFrame) -> pd.DataFrame:
         "feature_set",
         "split",
         "dataset",
+        "seed",
+        "n_seeds",
+        "seed_list",
         "mae",
         "mse",
         "rmse",
         "r2",
+        "mae_mean",
+        "mae_std",
+        "rmse_mean",
+        "rmse_std",
+        "r2_mean",
+        "r2_std",
         "rows_train",
         "rows_val",
         "rows_test",
         "num_crops",
+        "input_dim",
     ]
 
     path_cols = [c for c in df.columns if "path" in c.lower()]
@@ -28,24 +38,29 @@ def reorder_summary_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def visible_summary_columns(df: pd.DataFrame) -> list[str]:
-    return [
-        c for c in [
+    preferred = [
         "model",
         "feature_mode",
         "feature_set",
         "split",
         "dataset",
+        "seed",
+        "n_seeds",
         "mae",
-        "mse",
         "rmse",
         "r2",
+        "mae_mean",
+        "mae_std",
+        "rmse_mean",
+        "rmse_std",
+        "r2_mean",
+        "r2_std",
         "rows_train",
         "rows_val",
         "rows_test",
         "num_crops",
-        ]
-        if c in df.columns
     ]
+    return [c for c in preferred if c in df.columns]
 
 
 def print_summary(df: pd.DataFrame) -> None:
