@@ -15,6 +15,14 @@ from src.core.config import RANDOM_STATE
 from src.core.data.io import load_csv, summarize_dataframe, validate_required_columns
 from src.research_3_forecast.config import RESEARCH_3_CONFIG
 
+def _get_active_scenario() -> tuple[str, dict]:
+    scenario_name = RESEARCH_3_CONFIG["scenario_name"]
+    scenarios = RESEARCH_3_CONFIG["scenarios"]
+
+    if scenario_name not in scenarios:
+        raise ValueError(f"Неизвестный scenario_name: {scenario_name}")
+
+    return scenario_name, scenarios[scenario_name]
 
 @dataclass
 class PreparedEnrichedDataset:
@@ -177,6 +185,31 @@ def add_yield_history_features(df: pd.DataFrame) -> pd.DataFrame:
 
     return df
 
+def add_agro_weather_windows(df: pd.DataFrame) -> pd.DataFrame:
+    cfg = RESEARCH_3_CONFIG
+
+    if not bool(cfg.get("use_agro_weather_windows", False)):
+        return df
+
+    df = df.copy()
+
+    for base_name, months, new_name in cfg.get("agro_weather_windows", []):
+        cols = [f"{base_name}_{m:02d}" for m in months if f"{base_name}_{m:02d}" in df.columns]
+
+        if not cols:
+            continue
+
+        if base_name in {"precip_sum", "rain_sum", "rain_days", "hot_days", "dry_days"}:
+            df[new_name] = df[cols].sum(axis=1)
+        else:
+            df[new_name] = df[cols].mean(axis=1)
+
+    created_cols = [c for c in df.columns if c in {x[2] for x in cfg.get("agro_weather_windows", [])}]
+    print("\n[DEBUG][research_3] agro weather window cols:")
+    print(created_cols)
+
+    return df
+
 def _is_weather_month_col(col: str) -> bool:
     weather_prefixes = [
         "dry_days_",
@@ -257,6 +290,93 @@ def add_missing_indicators(df: pd.DataFrame) -> pd.DataFrame:
 
     return df
 
+def apply_forecast_scenario(df: pd.DataFrame) -> pd.DataFrame:
+    scenario_name, scenario_cfg = _get_active_scenario()
+
+    df = df.copy()
+    cols_to_drop: list[str] = []
+
+    season_cols = [c for c in df.columns if c.startswith("season_")]
+    cols_to_drop.extend(season_cols)
+
+    weather_month_cols = [c for c in df.columns if _is_weather_month_col(c)]
+    weather_cutoff = scenario_cfg.get("weather_month_cutoff", 9)
+
+    if weather_cutoff is None:
+        cols_to_drop.extend(weather_month_cols)
+    else:
+        for col in weather_month_cols:
+            month = _extract_month_from_col(col)
+            if month is None:
+                continue
+            if month > int(weather_cutoff):
+                cols_to_drop.append(col)
+
+    keep_weather_windows = bool(scenario_cfg.get("keep_weather_windows", True))
+    if not keep_weather_windows:
+        window_cols = [c for c in df.columns if c in {x[2] for x in RESEARCH_3_CONFIG.get("agro_weather_windows", [])}]
+        cols_to_drop.extend(window_cols)
+
+    if not bool(scenario_cfg.get("keep_sown_area", True)):
+        cols_to_drop.extend([c for c in ["sown_area", "sown_area_was_missing"] if c in df.columns])
+
+    if not bool(scenario_cfg.get("keep_fertilizers", True)):
+        fert_cols = [c for c in df.columns if _column_belongs_to_group(c, "fertilizers")]
+        fert_missing_cols = [
+            c for c in df.columns
+            if c.endswith("_was_missing") and (
+                "fertilizer" in c.lower()
+                or "fertilizers" in c.lower()
+                or "mineral" in c.lower()
+                or "удобр" in c.lower()
+            )
+        ]
+        cols_to_drop.extend(fert_cols)
+        cols_to_drop.extend(fert_missing_cols)
+
+    if not bool(scenario_cfg.get("keep_machinery", True)):
+        mach_cols = [c for c in df.columns if _column_belongs_to_group(c, "machinery")]
+        mach_missing_cols = [
+            c for c in df.columns
+            if c.endswith("_was_missing") and (
+                "machinery" in c.lower()
+                or "machine" in c.lower()
+                or "tractor" in c.lower()
+                or "combine" in c.lower()
+                or "tech" in c.lower()
+                or "техник" in c.lower()
+            )
+        ]
+        cols_to_drop.extend(mach_cols)
+        cols_to_drop.extend(mach_missing_cols)
+
+    if not bool(scenario_cfg.get("keep_fert_coverage", True)):
+        fert_coverage_cols = [
+            "fertilizer_municipality_count",
+            "fertilizer_records_count",
+            "valid_fertilizer_values_count",
+            "fertilizer_municipality_count_was_missing",
+            "fertilizer_records_count_was_missing",
+            "valid_fertilizer_values_count_was_missing",
+        ]
+        cols_to_drop.extend([c for c in fert_coverage_cols if c in df.columns])
+
+    cols_to_drop = sorted(set(c for c in cols_to_drop if c in df.columns))
+
+    print("\n" + "=" * 100)
+    print(f"Research 3 | SCENARIO: {scenario_name}")
+    print(f"weather_month_cutoff = {weather_cutoff}")
+    print(f"keep_sown_area      = {scenario_cfg.get('keep_sown_area', True)}")
+    print(f"keep_fertilizers    = {scenario_cfg.get('keep_fertilizers', True)}")
+    print(f"keep_machinery      = {scenario_cfg.get('keep_machinery', True)}")
+    print(f"keep_fert_coverage  = {scenario_cfg.get('keep_fert_coverage', True)}")
+    print(f"columns dropped     = {len(cols_to_drop)}")
+    if cols_to_drop:
+        for col in cols_to_drop:
+            print(f"  - {col}")
+    print("=" * 100)
+
+    return df.drop(columns=cols_to_drop, errors="ignore")
 
 def split_random(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     cfg = RESEARCH_3_CONFIG
@@ -509,7 +629,7 @@ def build_preprocessor(
                 "fert_mach_num",
                 Pipeline(
                     steps=[
-                        ("imputer", SimpleImputer(strategy="constant", fill_value=0.0)),
+                        ("imputer", SimpleImputer(strategy="constant", fill_value=0)),
                         ("scaler", StandardScaler()),
                     ]
                 ),
@@ -562,8 +682,9 @@ def prepare_forecast_dataset(
     df = load_enriched_dataframe()
     df = clean_enriched_dataframe(df)
     df = add_yield_history_features(df)
+    df = add_agro_weather_windows(df)
     df = add_missing_indicators(df)
-    df = apply_weather_month_cutoff(df)
+    df = apply_forecast_scenario(df)
 
     if split_name == "year":
         train_df, val_df, test_df = split_by_year(df)

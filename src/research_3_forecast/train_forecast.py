@@ -10,10 +10,11 @@ import torch.nn as nn
 
 from src.core.config import (
     MLP_RESNET_CONFIG,
+    MODEL_TRAIN_CONFIGS,
     MODEL_TYPES,
     RANDOM_STATE,
     TAB_MLP_CONFIG,
-    TRAIN_CONFIG,
+    TRAIN_DEFAULTS,
     TRANSFORMER_CONFIG,
     WIDE_DEEP_CONFIG,
     ensure_project_dirs,
@@ -53,6 +54,7 @@ def _seed_suffix(seed: int) -> str:
 
 
 def _checkpoint_path(
+    scenario_name: str,
     split_name: str,
     feature_set_name: str,
     model_type: str,
@@ -61,7 +63,7 @@ def _checkpoint_path(
 ):
     return (
         RESEARCH_3_CONFIG["results"]["models"]
-        / f"research_3_{split_name}_{feature_set_name}_{model_type}_{feature_mode}{_seed_suffix(seed)}.pt"
+        / f"research_3_{scenario_name}_{split_name}_{feature_set_name}_{model_type}_{feature_mode}{_seed_suffix(seed)}.pt"
     )
 
 
@@ -129,6 +131,24 @@ def _aggregate_seed_results(summary_df: pd.DataFrame) -> pd.DataFrame:
 
     return agg_df
 
+def _resolve_train_config(model_type: str, cfg: dict[str, Any]) -> dict[str, Any]:
+    resolved = dict(TRAIN_DEFAULTS)
+    resolved.update(MODEL_TRAIN_CONFIGS.get(model_type, {}))
+
+    research_train_overrides = cfg.get("train_overrides", {})
+    if isinstance(research_train_overrides, dict):
+        resolved.update(research_train_overrides)
+
+    research_model_overrides = cfg.get("model_train_overrides", {})
+    if isinstance(research_model_overrides, dict):
+        resolved.update(research_model_overrides.get(model_type, {}))
+
+    if "epochs" in cfg:
+        resolved["epochs"] = cfg["epochs"]
+    if "patience" in cfg:
+        resolved["patience"] = cfg["patience"]
+
+    return resolved
 
 def train_one_model(
     split_name: str,
@@ -140,6 +160,8 @@ def train_one_model(
     seed: int,
 ) -> dict[str, Any]:
     cfg = RESEARCH_3_CONFIG
+    train_cfg = _resolve_train_config(model_type=model_type, cfg=cfg)
+    scenario_name = cfg["scenario_name"]
 
     seed_everything(seed)
 
@@ -148,8 +170,8 @@ def train_one_model(
         use_log_target=bool(cfg.get("use_log_target", True)),
     )
 
-    batch_size = int(TRAIN_CONFIG.get("batch_size", 256))
-    num_workers = int(TRAIN_CONFIG.get("num_workers", 0))
+    batch_size = int(train_cfg.get("batch_size", 256))
+    num_workers = int(train_cfg.get("num_workers", 0))
     balanced_sampler = bool(cfg.get("balanced_sampler", False))
 
     train_loader = make_loader(
@@ -189,11 +211,11 @@ def train_one_model(
 
     optimizer = torch.optim.AdamW(
         model.parameters(),
-        lr=float(TRAIN_CONFIG.get("lr", 1e-3)),
-        weight_decay=float(TRAIN_CONFIG.get("weight_decay", 1e-5)),
+        lr=float(train_cfg.get("lr", 1e-3)),
+        weight_decay=float(train_cfg.get("weight_decay", 1e-5)),
     )
 
-    criterion = nn.HuberLoss(delta=float(TRAIN_CONFIG.get("huber_delta", 1.0)))
+    criterion = nn.HuberLoss(delta=float(train_cfg.get("huber_delta", 1.0)))
 
     history, _ = fit_with_early_stopping(
         model=model,
@@ -203,9 +225,9 @@ def train_one_model(
         criterion=criterion,
         device=device,
         target_scaler=target_scaler,
-        epochs=int(cfg.get("epochs", TRAIN_CONFIG.get("epochs", 25))),
-        patience=int(cfg.get("patience", TRAIN_CONFIG.get("patience", 8))),
-        clip_grad_norm=float(TRAIN_CONFIG.get("clip_grad_norm", 2.0)),
+        epochs=int(cfg.get("epochs", train_cfg.get("epochs", 25))),
+        patience=int(cfg.get("patience", train_cfg.get("patience", 8))),
+        clip_grad_norm=float(train_cfg.get("clip_grad_norm", 2.0)),
         verbose_prefix=(
             f"[research_3][{split_name}][{feature_set_name}]"
             f"[enriched][{model_type}][{feature_mode}]"
@@ -235,6 +257,7 @@ def train_one_model(
     predictions_df["abs_error"] = (predictions_df["y_true"] - predictions_df["y_pred"]).abs()
 
     checkpoint_path = _checkpoint_path(
+        scenario_name=scenario_name,
         split_name=split_name,
         feature_set_name=feature_set_name,
         model_type=model_type,
@@ -270,21 +293,21 @@ def train_one_model(
 
     pd.DataFrame(history).to_csv(
         cfg["results"]["metrics"]
-        / f"research_3_history_{split_name}_{feature_set_name}_{model_type}_{feature_mode}{seed_suffix}.csv",
+        / f"research_3_history_{scenario_name}_{split_name}_{feature_set_name}_{model_type}_{feature_mode}{seed_suffix}.csv",
         index=False,
         encoding="utf-8-sig",
     )
 
     by_crop_df.to_csv(
         cfg["results"]["tables"]
-        / f"research_3_metrics_by_crop_{split_name}_{feature_set_name}_{model_type}_{feature_mode}{seed_suffix}.csv",
+        / f"research_3_metrics_by_crop_{scenario_name}_{split_name}_{feature_set_name}_{model_type}_{feature_mode}{seed_suffix}.csv",
         index=False,
         encoding="utf-8-sig",
     )
 
     predictions_df.to_csv(
         cfg["results"]["tables"]
-        / f"research_3_predictions_{split_name}_{feature_set_name}_{model_type}_{feature_mode}{seed_suffix}.csv",
+        / f"research_3_predictions_{scenario_name}_{split_name}_{feature_set_name}_{model_type}_{feature_mode}{seed_suffix}.csv",
         index=False,
         encoding="utf-8-sig",
     )
@@ -298,6 +321,7 @@ def train_one_model(
             "dataset": cfg["dataset_label"],
             "feature_set": feature_set_name,
             "seed": seed,
+            "scenario": scenario_name,
             "rows_train": int(len(prepared.train_df)),
             "rows_val": int(len(prepared.val_df)),
             "rows_test": int(len(prepared.test_df)),
@@ -384,7 +408,9 @@ def main(
 
     summary_df = reorder_summary_columns(summary_df)
 
-    raw_out_path = cfg["results"]["metrics"] / "research_3_forecast_metrics_by_seed.csv"
+    scenario_name = cfg["scenario_name"]
+
+    raw_out_path = cfg["results"]["metrics"] / f"research_3_forecast_metrics_by_seed_{scenario_name}.csv"
     summary_df.to_csv(raw_out_path, index=False, encoding="utf-8-sig")
 
     print("\n[research_3] raw per-seed results")
@@ -392,7 +418,7 @@ def main(
     print(f"Saved: {raw_out_path}")
 
     if len(selected_seeds) == 1:
-        single_out_path = cfg["results"]["metrics"] / "research_3_forecast_metrics.csv"
+        single_out_path = cfg["results"]["metrics"] / f"research_3_forecast_metrics_{scenario_name}.csv"
         summary_df.to_csv(single_out_path, index=False, encoding="utf-8-sig")
         print(f"Saved: {single_out_path}")
         return
@@ -400,7 +426,7 @@ def main(
     agg_df = _aggregate_seed_results(summary_df)
     agg_df = reorder_summary_columns(agg_df)
 
-    agg_out_path = cfg["results"]["metrics"] / "research_3_forecast_metrics_seed_agg.csv"
+    agg_out_path = cfg["results"]["metrics"] / f"research_3_forecast_metrics_seed_agg_{scenario_name}.csv"
     agg_df.to_csv(agg_out_path, index=False, encoding="utf-8-sig")
 
     print("\n[research_3] aggregated seed results")

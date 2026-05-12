@@ -5,6 +5,7 @@ from src.core.config import INTERIM_DATA_DIR, PROCESSED_DATA_DIR, RESEARCH_3_RES
 
 RESEARCH_3_CONFIG = {
     "name": "research_3_forecast",
+
     "base_dataset_path": INTERIM_DATA_DIR / "research_2" / "rosstat_agro_full.csv",
     "final_dataset_path": PROCESSED_DATA_DIR / "research_2" / "russian_final_cleaned.csv",
 
@@ -12,34 +13,16 @@ RESEARCH_3_CONFIG = {
     "crop_col": "crop",
     "year_col": "year",
 
-    "model_types": ["mlp_resnet", "transformer"],
+    "model_types": ["mlp_resnet", "transformer", "tab_mlp", "wide_deep"],
     "feature_modes": ["raw"],
-    "feature_sets": ["full"],
     "splits": ["year"],
-    "test_years": 2,
-    "val_years": 1,
-    "min_crop_count": 10,
+    "feature_sets": ["full"],
 
     "train_years_range": [2000, 2016],
     "val_years_range": [2017, 2020],
     "test_years_range": [2021, 2024],
 
-    "always_exclude_cols": [
-        "gross_harvest",
-    ],
-
-    "zero_fill_cols": [
-        "mineral_fertilizers_centner",
-        "mineral_fertilizers_tons",
-        "mineral_fertilizers_cumulative_centner",
-        "fertilizer_municipality_count",
-        "fertilizer_records_count",
-        "valid_fertilizer_values_count",
-        "agricultural_machinery_total_count",
-    ],
-
-    "use_log_target": True,
-    "balanced_sampler": True,
+    "min_crop_count": 10,
 
     "exclude_cols": [
         "gross_harvest",
@@ -49,28 +32,26 @@ RESEARCH_3_CONFIG = {
         "season_temp_min",
         "season_precip_sum",
         "season_rain_sum",
+        "season_rain_days",
         "season_humidity_mean",
         "season_hot_days",
         "season_dry_days",
-        "season_rain_days",
-    ],
 
-    "horizons": [
-        {
-            "name": "forecast_june",
-            "available_months": [4, 5, 6],
-        },
-        {
-            "name": "forecast_july",
-            "available_months": [4, 5, 6, 7],
-        },
-        {
-            "name": "forecast_august",
-            "available_months": [4, 5, 6, 7, 8],
-        },
-    ],
+        "dry_days_04", "dry_days_05", "dry_days_06", "dry_days_07", "dry_days_08", "dry_days_09",
+        "hot_days_04", "hot_days_05", "hot_days_06", "hot_days_07", "hot_days_08", "hot_days_09",
+        "humidity_mean_04", "humidity_mean_05", "humidity_mean_06", "humidity_mean_07", "humidity_mean_08", "humidity_mean_09",
+        "precip_sum_04", "precip_sum_05", "precip_sum_06", "precip_sum_07", "precip_sum_08", "precip_sum_09",
+        "rain_days_04", "rain_days_05", "rain_days_06", "rain_days_07", "rain_days_08", "rain_days_09",
+        "rain_sum_04", "rain_sum_05", "rain_sum_06", "rain_sum_07", "rain_sum_08", "rain_sum_09",
+        "temp_max_04", "temp_max_05", "temp_max_06", "temp_max_07", "temp_max_08", "temp_max_09",
+        "temp_mean_04", "temp_mean_05", "temp_mean_06", "temp_mean_07", "temp_mean_08", "temp_mean_09",
+        "temp_min_04", "temp_min_05", "temp_min_06", "temp_min_07", "temp_min_08", "temp_min_09",
+        ],
 
     "zero_fill_all_nulls": False,
+    "use_log_target": True,
+    "balanced_sampler": True,
+    "use_agro_weather_windows": True,
 
     "epochs": 40,
     "patience": 10,
@@ -113,19 +94,95 @@ RESEARCH_3_CONFIG = {
     "yield_lags": [1, 2, 3],
     "yield_roll_windows": [3],
 
-    "weather_month_cutoff": 9,
+    "scenario_name": "F0_full_nowcast",
 
-    "quality_threshold_r2": 0.90,
-    "quality_threshold_rmse": 17.0,
+    "scenarios": {
+        # Полный nowcast
+        "F0_full_nowcast": {
+            "weather_month_cutoff": 9,
+            "keep_sown_area": True,
+            "keep_fertilizers": True,
+            "keep_machinery": True,
+            "keep_fert_coverage": True,
+        },
+
+        "F1_mid_july": {
+            "weather_month_cutoff": 7,
+            "keep_sown_area": True,
+            "keep_fertilizers": True,
+            "keep_machinery": True,
+            "keep_fert_coverage": True,
+        },
+        "F1_mid_june": {
+            "weather_month_cutoff": 6,
+            "keep_sown_area": True,
+            "keep_fertilizers": True,
+            "keep_machinery": True,
+            "keep_fert_coverage": True,
+        },
+
+        "F2_early_may": {
+            "weather_month_cutoff": 5,
+            "keep_sown_area": True,
+            "keep_fertilizers": False,
+            "keep_machinery": False,
+            "keep_fert_coverage": False,
+        },
+        "F2_early_april": {
+            "weather_month_cutoff": 4,
+            "keep_sown_area": True,
+            "keep_fertilizers": False,
+            "keep_machinery": False,
+            "keep_fert_coverage": False,
+        },
+
+        "F3_preseason_operational": {
+            "weather_month_cutoff": None,
+            "keep_sown_area": True,
+            "keep_fertilizers": False,
+            "keep_machinery": False,
+            "keep_fert_coverage": False,
+        },
+        "F3_preseason_strict": {
+            "weather_month_cutoff": None,
+            "keep_sown_area": False,
+            "keep_fertilizers": False,
+            "keep_machinery": False,
+            "keep_fert_coverage": False,
+        },
+        "F2_windows_only": {
+            "weather_month_cutoff": None,
+            "keep_weather_windows": True,
+            "keep_sown_area": True,
+            "keep_fertilizers": False,
+            "keep_machinery": False,
+            "keep_fert_coverage": False,
+        },
+    },
+
+    "quality_thresholds": {
+        "F0_full_nowcast": {"r2": 0.90, "rmse": 17.0},
+        "F1_mid_july": {"r2": 0.90, "rmse": 17.0},
+        "F1_mid_june": {"r2": 0.90, "rmse": 17.0},
+        "F2_early_may": {"r2": 0.88, "rmse": 18.0},
+        "F2_early_april": {"r2": 0.88, "rmse": 18.0},
+        "F3_preseason_operational": {"r2": 0.85, "rmse": 19.0},
+        "F3_preseason_strict": {"r2": 0.85, "rmse": 19.0},
+    },
+
+    "agro_weather_windows": [
+    ("precip_sum", [4, 5], "precip_04_05"),
+    ("precip_sum", [5, 6], "precip_05_06"),
+    ("precip_sum", [6, 7], "precip_06_07"),
+    ("hot_days", [6, 7], "hot_days_06_07"),
+    ("dry_days", [5, 6], "dry_days_05_06"),
+    ("dry_days", [6, 7], "dry_days_06_07"),
+    ("temp_mean", [5, 6], "temp_mean_05_06"),
+    ("temp_mean", [6, 7], "temp_mean_06_07"),
+    ("humidity_mean", [5, 6], "humidity_mean_05_06"),
+    ("humidity_mean", [6, 7], "humidity_mean_06_07"),
+        ],
 
     "dataset_label": "russian_final_cleaned",
     "results": RESEARCH_3_RESULTS,
-
-
-    "monthly_feature_prefixes": [
-        "temp_",
-        "precip_",
-        "ndvi_",
-    ],
-
 }

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import argparse
+
 from src.research_3_forecast.config import RESEARCH_3_CONFIG
 from src.research_3_forecast.train_forecast import main as train_main
 
+
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Research 3: forecast with weather month cutoff")
+    parser = argparse.ArgumentParser(description="Research 3: forecast scenarios")
 
     parser.add_argument(
         "command",
@@ -44,11 +46,25 @@ def parse_args() -> argparse.Namespace:
         help="Список seed для серии запусков",
     )
 
+    parser.add_argument(
+        "--scenario",
+        type=str,
+        default=None,
+        choices=list(RESEARCH_3_CONFIG["scenarios"].keys()),
+        help="Название forecast-сценария",
+    )
+
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+
+    if args.scenario is not None:
+        RESEARCH_3_CONFIG["scenario_name"] = args.scenario
+
+    print("[DEBUG][research_3] scenario_name =", RESEARCH_3_CONFIG["scenario_name"])
+    print("[DEBUG][research_3] splits =", RESEARCH_3_CONFIG["splits"])
 
     if args.command == "train":
         train_main(

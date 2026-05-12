@@ -457,7 +457,7 @@ def build_preprocessor(
                 "fert_mach_num",
                 Pipeline(
                     steps=[
-                        ("imputer", SimpleImputer(strategy="constant", fill_value=0.0)),
+                        ("imputer", SimpleImputer(strategy="constant", fill_value=0)),
                         ("scaler", StandardScaler()),
                     ]
                 ),
