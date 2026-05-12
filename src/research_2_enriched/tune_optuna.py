@@ -11,12 +11,15 @@ import optuna
 
 from src.core.config import (
     MLP_RESNET_CONFIG,
+    MODEL_TRAIN_CONFIGS,
+    MODEL_TYPES,
     RANDOM_STATE,
-    RESEARCH_2_RESULTS,
     TAB_MLP_CONFIG,
-    TRAIN_CONFIG,
+    TRAIN_DEFAULTS,
     TRANSFORMER_CONFIG,
+    WIDE_DEEP_CONFIG,
     ensure_project_dirs,
+    RESEARCH_2_RESULTS,
 )
 from src.core.data.target_scaler import TargetScaler
 from src.core.evaluation.metrics import regression_metrics
@@ -107,7 +110,7 @@ def _suggest_train_config(trial: "optuna.Trial") -> dict[str, Any]:
         "clip_grad_norm": trial.suggest_float("clip_grad_norm", 0.5, 5.0),
         "epochs": trial.suggest_categorical("epochs", [20, 25, 30, 35, 40]),
         "patience": trial.suggest_categorical("patience", [5, 6, 8, 10]),
-        "num_workers": int(TRAIN_CONFIG.get("num_workers", 0)),
+        "num_workers": int(TRAIN_DEFAULTS.get("num_workers", 0)),
     }
 
 

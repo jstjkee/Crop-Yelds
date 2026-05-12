@@ -10,10 +10,11 @@ import torch.nn as nn
 
 from src.core.config import (
     MLP_RESNET_CONFIG,
+    MODEL_TRAIN_CONFIGS,
     MODEL_TYPES,
     RANDOM_STATE,
     TAB_MLP_CONFIG,
-    TRAIN_CONFIG,
+    TRAIN_DEFAULTS,
     TRANSFORMER_CONFIG,
     WIDE_DEEP_CONFIG,
     ensure_project_dirs,
@@ -129,6 +130,24 @@ def _aggregate_seed_results(summary_df: pd.DataFrame) -> pd.DataFrame:
 
     return agg_df
 
+def _resolve_train_config(model_type: str, cfg: dict[str, Any]) -> dict[str, Any]:
+    resolved = dict(TRAIN_DEFAULTS)
+    resolved.update(MODEL_TRAIN_CONFIGS.get(model_type, {}))
+
+    research_train_overrides = cfg.get("train_overrides", {})
+    if isinstance(research_train_overrides, dict):
+        resolved.update(research_train_overrides)
+
+    research_model_overrides = cfg.get("model_train_overrides", {})
+    if isinstance(research_model_overrides, dict):
+        resolved.update(research_model_overrides.get(model_type, {}))
+
+    if "epochs" in cfg:
+        resolved["epochs"] = cfg["epochs"]
+    if "patience" in cfg:
+        resolved["patience"] = cfg["patience"]
+
+    return resolved
 
 def train_one_model(
     split_name: str,
@@ -140,6 +159,7 @@ def train_one_model(
     seed: int,
 ) -> dict[str, Any]:
     cfg = RESEARCH_2_CONFIG
+    train_cfg = _resolve_train_config(model_type=model_type, cfg=cfg)
 
     if feature_mode != "raw":
         raise ValueError("В Research 2 пока поддерживается только feature_mode='raw'")
@@ -151,8 +171,8 @@ def train_one_model(
         use_log_target=bool(cfg.get("use_log_target", True)),
     )
 
-    batch_size = int(TRAIN_CONFIG.get("batch_size", 256))
-    num_workers = int(TRAIN_CONFIG.get("num_workers", 0))
+    batch_size = int(train_cfg.get("batch_size", 256))
+    num_workers = int(train_cfg.get("num_workers", 0))
     balanced_sampler = bool(cfg.get("balanced_sampler", False))
 
     train_loader = make_loader(
@@ -192,11 +212,11 @@ def train_one_model(
 
     optimizer = torch.optim.AdamW(
         model.parameters(),
-        lr=float(TRAIN_CONFIG.get("lr", 1e-3)),
-        weight_decay=float(TRAIN_CONFIG.get("weight_decay", 1e-5)),
+        lr=float(train_cfg.get("lr", 1e-3)),
+        weight_decay=float(train_cfg.get("weight_decay", 1e-5)),
     )
 
-    criterion = nn.HuberLoss(delta=float(TRAIN_CONFIG.get("huber_delta", 1.0)))
+    criterion = nn.HuberLoss(delta=float(train_cfg.get("huber_delta", 1.0)))
 
     history, _ = fit_with_early_stopping(
         model=model,
@@ -206,9 +226,9 @@ def train_one_model(
         criterion=criterion,
         device=device,
         target_scaler=target_scaler,
-        epochs=int(cfg.get("epochs", TRAIN_CONFIG.get("epochs", 25))),
-        patience=int(cfg.get("patience", TRAIN_CONFIG.get("patience", 8))),
-        clip_grad_norm=float(TRAIN_CONFIG.get("clip_grad_norm", 2.0)),
+        epochs=int(cfg.get("epochs", train_cfg.get("epochs", 25))),
+        patience=int(cfg.get("patience", train_cfg.get("patience", 8))),
+        clip_grad_norm=float(train_cfg.get("clip_grad_norm", 2.0)),
         verbose_prefix=(
             f"[research_2][{split_name}][{feature_set_name}]"
             f"[enriched][{model_type}][{feature_mode}]"

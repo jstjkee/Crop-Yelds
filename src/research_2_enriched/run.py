@@ -4,15 +4,19 @@ import argparse
 
 from src.research_2_enriched.compare_feature_sets import main as compare_main
 from src.research_2_enriched.config import RESEARCH_2_CONFIG
+from src.research_2_enriched.eda_dataset import main as eda_main
 from src.research_2_enriched.train_enriched import main as train_main
+from src.research_2_enriched.tune_optuna import main as tune_main
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Research 2: enriched Russian dataset pipeline")
+    parser = argparse.ArgumentParser(
+        description="Research 2: enriched Russian dataset pipeline"
+    )
 
     parser.add_argument(
         "command",
-        choices=["train", "compare", "all"],
+        choices=["train", "compare", "eda", "tune", "all"],
         help="Какой сценарий запустить",
     )
 
@@ -47,11 +51,51 @@ def parse_args() -> argparse.Namespace:
         help="Список seed для серии запусков, например: --seed-list 42 52 62",
     )
 
+    # Аргументы для Optuna
+    parser.add_argument(
+        "--model",
+        default="transformer",
+        choices=["transformer", "mlp_resnet", "tab_mlp"],
+        help="Модель для Optuna-подбора",
+    )
+
+    parser.add_argument(
+        "--feature-set",
+        default="full",
+        choices=RESEARCH_2_CONFIG["feature_sets"],
+        help="Какой feature set использовать при подборе",
+    )
+
+    parser.add_argument(
+        "--split",
+        default="year",
+        choices=RESEARCH_2_CONFIG["splits"],
+        help="Какой split использовать при подборе",
+    )
+
+    parser.add_argument(
+        "--trials",
+        type=int,
+        default=20,
+        help="Количество trial для Optuna",
+    )
+
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=None,
+        help="Ограничение по времени в секундах для Optuna",
+    )
+
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+
+    if args.command == "eda":
+        eda_main()
+        return
 
     if args.command == "train":
         train_main(
@@ -66,6 +110,18 @@ def main() -> None:
         compare_main()
         return
 
+    if args.command == "tune":
+        tune_main(
+            model_type=args.model,
+            feature_mode=(args.feature_modes[0] if args.feature_modes else "raw"),
+            split_name=args.split,
+            feature_set_name=args.feature_set,
+            n_trials=args.trials,
+            timeout=args.timeout,
+        )
+        return
+
+    eda_main()
     train_main(
         models=args.models,
         feature_modes=args.feature_modes,
