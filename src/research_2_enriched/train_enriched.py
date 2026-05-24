@@ -21,7 +21,11 @@ from src.core.config import (
 )
 from src.core.data.target_scaler import TargetScaler
 from src.core.evaluation.metrics import build_metrics_row, regression_metrics, regression_metrics_by_crop
-from src.core.evaluation.reports import print_summary, reorder_summary_columns
+from src.core.evaluation.reports import (
+    print_summary,
+    reorder_crop_metrics_columns,
+    reorder_summary_columns,
+)
 from src.core.training.dl_trainer import (
     build_model,
     fit_with_early_stopping,
@@ -106,27 +110,42 @@ def _aggregate_seed_results(summary_df: pd.DataFrame) -> pd.DataFrame:
         if c in summary_df.columns
     ]
 
+    agg_spec = {
+        "n_seeds": ("seed", "nunique"),
+        "seed_list": ("seed", lambda s: ",".join(map(str, sorted(pd.unique(s).tolist())))),
+
+        "mae_mean": ("mae", "mean"),
+        "mae_std": ("mae", "std"),
+        "mse_mean": ("mse", "mean"),
+        "mse_std": ("mse", "std"),
+        "rmse_mean": ("rmse", "mean"),
+        "rmse_std": ("rmse", "std"),
+        "r2_mean": ("r2", "mean"),
+        "r2_std": ("r2", "std"),
+    }
+
+    optional_metric_cols = [
+        "nmae_percent",
+        "nrmse_percent",
+        "nmape_percent",
+        "target_mean_abs",
+    ]
+
+    for col in optional_metric_cols:
+        if col in summary_df.columns:
+            agg_spec[f"{col}_mean"] = (col, "mean")
+            agg_spec[f"{col}_std"] = (col, "std")
+
     agg_df = (
         summary_df
         .groupby(group_cols, dropna=False)
-        .agg(
-            n_seeds=("seed", "nunique"),
-            seed_list=("seed", lambda s: ",".join(map(str, sorted(pd.unique(s).tolist())))),
-            mae_mean=("mae", "mean"),
-            mae_std=("mae", "std"),
-            mse_mean=("mse", "mean"),
-            mse_std=("mse", "std"),
-            rmse_mean=("rmse", "mean"),
-            rmse_std=("rmse", "std"),
-            r2_mean=("r2", "mean"),
-            r2_std=("r2", "std"),
-        )
+        .agg(**agg_spec)
         .reset_index()
     )
 
-    for col in ["mae_std", "mse_std", "rmse_std", "r2_std"]:
-        if col in agg_df.columns:
-            agg_df[col] = agg_df[col].fillna(0.0)
+    std_cols = [c for c in agg_df.columns if c.endswith("_std")]
+    for col in std_cols:
+        agg_df[col] = agg_df[col].fillna(0.0)
 
     return agg_df
 
@@ -252,6 +271,15 @@ def train_one_model(
         id_to_crop=prepared.id_to_crop,
     )
 
+    by_crop_df.insert(0, "seed", seed)
+    by_crop_df.insert(0, "dataset", cfg["dataset_label"])
+    by_crop_df.insert(0, "split", f"research_2_{split_name}_test")
+    by_crop_df.insert(0, "feature_set", feature_set_name)
+    by_crop_df.insert(0, "feature_mode", feature_mode)
+    by_crop_df.insert(0, "model", model_type)
+
+    by_crop_df = reorder_crop_metrics_columns(by_crop_df)
+
     predictions_df = prepared.test_df.copy()
     predictions_df["y_true"] = y_test_true
     predictions_df["y_pred"] = y_test_pred
@@ -298,12 +326,33 @@ def train_one_model(
         encoding="utf-8-sig",
     )
 
+    by_crop_path = (
+            cfg["results"]["tables"]
+            / f"research_2_metrics_by_crop_{split_name}_{feature_set_name}_{model_type}_{feature_mode}{seed_suffix}.csv"
+    )
+
     by_crop_df.to_csv(
-        cfg["results"]["tables"]
-        / f"research_2_metrics_by_crop_{split_name}_{feature_set_name}_{model_type}_{feature_mode}{seed_suffix}.csv",
+        by_crop_path,
         index=False,
         encoding="utf-8-sig",
     )
+
+    print("\nМетрики по каждой культуре / голове:")
+    print(
+        by_crop_df[
+            [
+                "crop",
+                "count",
+                "mae",
+                "rmse",
+                "r2",
+                "nmae_percent",
+                "nrmse_percent",
+                "nmape_percent",
+            ]
+        ].to_string(index=False)
+    )
+    print(f"\nТаблица сохранена: {by_crop_path}")
 
     predictions_df.to_csv(
         cfg["results"]["tables"]

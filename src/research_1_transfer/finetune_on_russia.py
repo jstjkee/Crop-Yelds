@@ -6,10 +6,14 @@ import torch
 import torch.nn as nn
 from sklearn.model_selection import train_test_split
 
-from src.core.config import MODEL_TYPES, RANDOM_STATE, TRAIN_CONFIG, ensure_project_dirs
+from src.core.config import MODEL_TYPES, RANDOM_STATE, MODEL_TRAIN_CONFIGS, ensure_project_dirs
 from src.core.data.target_scaler import TargetScaler
 from src.core.evaluation.metrics import build_metrics_row, regression_metrics, regression_metrics_by_crop
-from src.core.evaluation.reports import print_summary, reorder_summary_columns
+from src.core.evaluation.reports import (
+    print_summary,
+    reorder_crop_metrics_columns,
+    reorder_summary_columns,
+)
 from src.core.training.dl_trainer import (
     fit_with_early_stopping,
     get_device,
@@ -118,10 +122,10 @@ def finetune_one_model(
 
     optimizer = torch.optim.AdamW(
         model.parameters(),
-        lr=float(RESEARCH_1_CONFIG.get("finetune_lr", TRAIN_CONFIG.get("finetune_lr", 5e-4))),
-        weight_decay=float(TRAIN_CONFIG.get("weight_decay", 1e-5)),
+        lr=float(RESEARCH_1_CONFIG.get("finetune_lr", MODEL_TRAIN_CONFIGS.get("finetune_lr", 5e-4))),
+        weight_decay=float(MODEL_TRAIN_CONFIGS.get("weight_decay", 1e-5)),
     )
-    criterion = nn.HuberLoss(delta=float(TRAIN_CONFIG.get("huber_delta", 1.0)))
+    criterion = nn.HuberLoss(delta=float(MODEL_TRAIN_CONFIGS.get("huber_delta", 1.0)))
 
     history, _ = fit_with_early_stopping(
         model=model,
@@ -131,9 +135,9 @@ def finetune_one_model(
         criterion=criterion,
         device=device,
         target_scaler=target_scaler,
-        epochs=int(RESEARCH_1_CONFIG.get("finetune_epochs", TRAIN_CONFIG.get("finetune_epochs", 8))),
-        patience=int(RESEARCH_1_CONFIG.get("finetune_patience", TRAIN_CONFIG.get("finetune_patience", 4))),
-        clip_grad_norm=float(TRAIN_CONFIG.get("clip_grad_norm", 2.0)),
+        epochs=int(RESEARCH_1_CONFIG.get("finetune_epochs", MODEL_TRAIN_CONFIGS.get("finetune_epochs", 8))),
+        patience=int(RESEARCH_1_CONFIG.get("finetune_patience", MODEL_TRAIN_CONFIGS.get("finetune_patience", 4))),
+        clip_grad_norm=float(MODEL_TRAIN_CONFIGS.get("clip_grad_norm", 2.0)),
         verbose_prefix=f"[research_1][finetune][{model_type}][{feature_mode}] ",
     )
 
@@ -152,6 +156,14 @@ def finetune_one_model(
         crop_ids=crop_ids,
         id_to_crop=id_to_crop,
     )
+
+    by_crop_df.insert(0, "dataset", "russian_crop_yield_clean")
+    by_crop_df.insert(0, "split", "target_finetuned_test")
+    by_crop_df.insert(0, "feature_mode", feature_mode)
+    by_crop_df.insert(0, "model", model_type)
+
+    by_crop_df = reorder_crop_metrics_columns(by_crop_df)
+
     by_crop_df.to_csv(
         RESEARCH_1_CONFIG["results"]["tables"] / f"transfer_finetuned_metrics_by_crop_{model_type}_{feature_mode}.csv",
         index=False,

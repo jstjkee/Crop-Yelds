@@ -6,7 +6,11 @@ import torch
 from src.core.config import MODEL_TYPES, RANDOM_STATE, ensure_project_dirs
 from src.core.data.target_scaler import TargetScaler
 from src.core.evaluation.metrics import build_metrics_row, regression_metrics, regression_metrics_by_crop
-from src.core.evaluation.reports import print_summary, reorder_summary_columns
+from src.core.evaluation.reports import (
+    print_summary,
+    reorder_crop_metrics_columns,
+    reorder_summary_columns,
+)
 from src.core.training.dl_trainer import (
     get_device,
     load_model_from_checkpoint,
@@ -70,6 +74,14 @@ def evaluate_one_model(
         crop_ids=crop_ids,
         id_to_crop=checkpoint["id_to_crop"],
     )
+
+    by_crop_df.insert(0, "dataset", "russian_crop_yield_clean")
+    by_crop_df.insert(0, "split", "target_zero_shot")
+    by_crop_df.insert(0, "feature_mode", feature_mode)
+    by_crop_df.insert(0, "model", model_type)
+
+    by_crop_df = reorder_crop_metrics_columns(by_crop_df)
+
     by_crop_df.to_csv(
         RESEARCH_1_CONFIG["results"]["tables"] / f"transfer_zero_shot_metrics_by_crop_{model_type}_{feature_mode}.csv",
         index=False,

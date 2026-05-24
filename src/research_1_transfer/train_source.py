@@ -12,13 +12,17 @@ from src.core.config import (
     MLP_RESNET_CONFIG,
     MODEL_TYPES,
     RANDOM_STATE,
-    TRAIN_CONFIG,
+    MODEL_TRAIN_CONFIGS,
     TRANSFORMER_CONFIG,
     ensure_project_dirs,
 )
 from src.core.data.target_scaler import TargetScaler
 from src.core.evaluation.metrics import build_metrics_row, regression_metrics, regression_metrics_by_crop
-from src.core.evaluation.reports import print_summary, reorder_summary_columns
+from src.core.evaluation.reports import (
+    print_summary,
+    reorder_crop_metrics_columns,
+    reorder_summary_columns,
+)
 from src.core.training.dl_trainer import (
     build_model,
     fit_with_early_stopping,
@@ -66,8 +70,8 @@ def train_one_model(
         use_log_target=bool(cfg.get("use_log_target", True)),
     )
 
-    batch_size = int(TRAIN_CONFIG.get("batch_size", 256))
-    num_workers = int(TRAIN_CONFIG.get("num_workers", 0))
+    batch_size = int(MODEL_TRAIN_CONFIGS.get("batch_size", 256))
+    num_workers = int(MODEL_TRAIN_CONFIGS.get("num_workers", 0))
     balanced_sampler = bool(cfg.get("balanced_sampler", False))
 
     train_loader = make_loader(
@@ -105,10 +109,10 @@ def train_one_model(
 
     optimizer = torch.optim.AdamW(
         model.parameters(),
-        lr=float(TRAIN_CONFIG.get("lr", 1e-3)),
-        weight_decay=float(TRAIN_CONFIG.get("weight_decay", 1e-5)),
+        lr=float(MODEL_TRAIN_CONFIGS.get("lr", 1e-3)),
+        weight_decay=float(MODEL_TRAIN_CONFIGS.get("weight_decay", 1e-5)),
     )
-    criterion = nn.HuberLoss(delta=float(TRAIN_CONFIG.get("huber_delta", 1.0)))
+    criterion = nn.HuberLoss(delta=float(MODEL_TRAIN_CONFIGS.get("huber_delta", 1.0)))
 
     history, _ = fit_with_early_stopping(
         model=model,
@@ -118,9 +122,9 @@ def train_one_model(
         criterion=criterion,
         device=device,
         target_scaler=target_scaler,
-        epochs=int(cfg.get("epochs", TRAIN_CONFIG.get("epochs", 25))),
-        patience=int(cfg.get("patience", TRAIN_CONFIG.get("patience", 8))),
-        clip_grad_norm=float(TRAIN_CONFIG.get("clip_grad_norm", 2.0)),
+        epochs=int(cfg.get("epochs", MODEL_TRAIN_CONFIGS.get("epochs", 25))),
+        patience=int(cfg.get("patience", MODEL_TRAIN_CONFIGS.get("patience", 8))),
+        clip_grad_norm=float(MODEL_TRAIN_CONFIGS.get("clip_grad_norm", 2.0)),
         verbose_prefix=f"[research_1][source][{model_type}][{feature_mode}] ",
     )
 
@@ -139,6 +143,13 @@ def train_one_model(
         crop_ids=crop_test,
         id_to_crop=prepared.id_to_crop,
     )
+
+    by_crop_df.insert(0, "dataset", "crop_yield_source")
+    by_crop_df.insert(0, "split", "source_test")
+    by_crop_df.insert(0, "feature_mode", feature_mode)
+    by_crop_df.insert(0, "model", model_type)
+
+    by_crop_df = reorder_crop_metrics_columns(by_crop_df)
 
     predictions_df = prepared.test_df.copy()
     predictions_df["y_true"] = y_test_true
