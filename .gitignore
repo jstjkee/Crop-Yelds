@@ -1,4 +1,4 @@
-# Python
+﻿# Python
 __pycache__/
 *.py[cod]
 *.pyo
@@ -8,6 +8,7 @@ __pycache__/
 # Virtual environment
 .venv/
 venv/
+env/
 
 # IDE
 .idea/
@@ -17,22 +18,31 @@ venv/
 .ipynb_checkpoints/
 
 # Data
-data/raw/*
-data/processed/*
-data/reference/*
+data/raw/**
 !data/raw/.gitkeep
+
+data/interim/**
+!data/interim/.gitkeep
+
+data/processed/**
 !data/processed/.gitkeep
 
-results/
-src/archive_legacy/models/*
+data/reference/*
+!data/reference/regions.csv
 
-# Models
-models/*.pkl
-models/*.joblib
+# Results and trained models
+results/**
+!results/.gitkeep
+
+models/
+*.pt
+*.pth
+*.pkl
+*.joblib
 
 # Reports
-reports/*.html
-reports/*.pdf
+reports/
+*.html
 
 # System
 .DS_Store
