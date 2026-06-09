@@ -374,7 +374,6 @@ def apply_train_fitted_quantile_clip_and_log(
                 )
 
         if log_enabled:
-            # На всякий случай не даём уйти в отрицательные
             train_df[col] = train_df[col].clip(lower=0)
             val_df[col] = val_df[col].clip(lower=0)
             test_df[col] = test_df[col].clip(lower=0)

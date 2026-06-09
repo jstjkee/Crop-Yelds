@@ -1,118 +1,167 @@
-# Crop Yield Forecast
+# Crop-Yelds
 
 Проект для магистерской работы по теме **прогнозирования урожайности сельскохозяйственных культур на основе табличных данных**.
 
-Текущая версия проекта содержит не старое MVP-приложение, а набор воспроизводимых исследовательских пайплайнов:
+Основная задача проекта — построение воспроизводимого исследовательского пайплайна, который позволяет обучать и сравнивать модели прогнозирования урожайности на открытых и российских аграрных данных.
 
-1. **Research 1 — Transfer learning**: обучение на большом открытом датасете и перенос на российские данные.
-2. **Research 2 — Enriched Russian dataset**: обучение на расширенном российском датасете с погодой, удобрениями и техникой.
-3. **Research 3 — Forecast scenarios**: проверка качества прогноза при разной заблаговременности, то есть при ограничении доступных погодных и управленческих признаков.
+1. **Research 1 — Transfer learning**
+   Проверка переноса обучения с большого открытого датасета на российские данные.
 
-Основная целевая задача — регрессия урожайности.
+2. **Research 2 — Enriched Russian dataset**
+   Построение модели на расширенном российском датасете с погодными, агротехническими и лаговыми признаками.
+
 
 ---
 
-## 1. Структура проекта
+## Содержание
+
+* [Описание проекта](#описание-проекта)
+* [Структура репозитория](#структура-репозитория)
+* [Установка](#установка)
+* [Данные](#данные)
+* [Модели](#модели)
+* [Research 1 — Transfer learning](#research-1--transfer-learning)
+* [Research 2 — Enriched Russian dataset](#research-2--enriched-russian-dataset)
+* [Результаты](#результаты)
+* [Метрики](#метрики)
+* [Работа с GitHub](#работа-с-github)
+
+---
+
+## Описание проекта
+
+Проект решает задачу регрессии: по набору признаков для региона, культуры и года необходимо спрогнозировать урожайность сельскохозяйственной культуры.
+
+Целевая переменная во втором исследовании:
 
 ```text
-crop-yeld/
+target_yield_centner_per_ha
+```
+
+То есть модель прогнозирует урожайность в центнерах с гектара.
+
+Ключевая идея проекта — не просто обучить одну модель, а построить полный пайплайн:
+
+1. загрузка и проверка данных;
+2. очистка и нормализация признаков;
+3. формирование обучающей, валидационной и тестовой выборок;
+4. построение признакового пространства;
+5. обучение нейросетевых моделей для табличных данных;
+6. использование многоголовой архитектуры с отдельными выходами по культурам;
+7. расчет общих метрик и метрик по каждой культуре;
+8. сохранение моделей, предсказаний и таблиц результатов.
+
+---
+
+## Структура репозитория
+
+```text
+Crop-Yelds/
 ├─ data/
-│  ├─ raw/
-│  │  ├─ research_1/
-│  │  │  ├─ crop_yield.csv
-│  │  │  └─ russian_crop_yield_clean.csv
-│  │  ├─ research_2/
-│  │  ├─ research_3/
-│  │  ├─ rosstat/
-│  │  └─ weather/
-│  ├─ interim/
-│  │  ├─ research_1/
-│  │  ├─ research_2/
-│  │  └─ research_3/
-│  └─ processed/
-│     ├─ research_1/
-│     ├─ research_2/
-│     │  └─ russian_final_cleaned.csv
-│     └─ research_3/
-│        └─ russian_final_forecast.csv
+│  ├─ raw/                         # исходные датасеты, не хранятся в Git
+│  ├─ interim/                     # промежуточные датасеты, не хранятся в Git
+│  ├─ processed/                   # обработанные датасеты, не хранятся в Git
+│  └─ reference/                   # справочные таблицы
+├─ results/                        # результаты экспериментов, не хранятся в Git
+│  ├─ research_1/
+│  │  ├─ figures/
+│  │  ├─ metrics/
+│  │  ├─ models/
+│  │  └─ tables/
+│  └─ research_2/
+│     ├─ figures/
+│     ├─ metrics/
+│     ├─ models/
+│     └─ tables/
 │
 ├─ src/
-│  ├─ core/
-│  │  ├─ config/
-│  │  ├─ data/
-│  │  ├─ evaluation/
-│  │  ├─ models/
-│  │  └─ training/
-│  ├─ research_1_transfer/
-│  ├─ research_2_enriched/
-│  └─ research_3_forecast/
-│
-├─ results/
-│  ├─ research_1/
-│  │  ├─ models/
-│  │  ├─ metrics/
-│  │  ├─ tables/
-│  │  └─ figures/
-│  ├─ research_2/
-│  └─ research_3/
-│
-├─ docs/
-├─ tests/
+│  ├─ core/                        # общая логика проекта
+│  │  ├─ config/                   # пути, настройки моделей и обучения
+│  │  ├─ data/                     # загрузка, предобработка, target scaling
+│  │  ├─ evaluation/               # метрики и отчеты
+│  │  ├─ models/                   # нейросетевые модели
+│  │  └─ training/                 # training loop, prediction, dataloader
+│  │
+│  ├─ research_1_transfer/         # первое исследование: transfer learning
+│  │  ├─ compare_variants.py
+│  │  ├─ config.py
+│  │  ├─ datasets.py
+│  │  ├─ evaluate_transfer.py
+│  │  ├─ features.py
+│  │  ├─ finetune_on_russia.py
+│  │  ├─ run.py
+│  │  ├─ train_russia_scratch.py
+│  │  └─ train_source.py
+│  │
+│  └─ research_2_enriched/         # второе исследование: расширенный российский датасет
+│     ├─ build_dataset.py
+│     ├─ compare_feature_sets.py
+│     ├─ config.py
+│     ├─ eda_dataset.py
+│     ├─ run.py
+│     ├─ train_enriched.py
+│     └─ tune_optuna.py
+│ 
+├─ .gitignore
 ├─ requirements.txt
 └─ README.md
 ```
 
-Ключевая логика находится в папках `src/research_1_transfer`, `src/research_2_enriched`, `src/research_3_forecast`. Общие модели, обучение, метрики и конфигурация вынесены в `src/core`.
+Основная переиспользуемая логика находится в `src/core`. Исследовательские сценарии вынесены в отдельные папки `src/research_1_transfer` и `src/research_2_enriched`.
 
 ---
 
-## 2. Установка и подготовка окружения
+## Установка
 
-Перейти в корень проекта:
+### 1. Клонировать репозиторий
 
 ```bash
-cd crop-yeld
+git clone https://github.com/jstjkee/Crop-Yelds.git
+cd Crop-Yelds
 ```
 
-Создать виртуальное окружение:
+### 2. Создать виртуальное окружение
 
 ```bash
 python -m venv .venv
 ```
 
-Активировать окружение.
+### 3. Активировать окружение
 
-Windows:
 
-```bash
-.venv\Scripts\activate
+```powershell
+.venv\Scripts\Activate.ps1
 ```
 
-Linux/macOS:
-
-```bash
-source .venv/bin/activate
-```
-
-Установить зависимости:
+### 4. Установить зависимости
 
 ```bash
 pip install -r requirements.txt
 ```
+
 ---
 
-## 3. Данные
+## Данные
+
+Датасеты не должны храниться в GitHub. После клонирования проекта их нужно положить локально в папку `data/`.
 
 ### Research 1
 
-Используются два датасета, приведённые к единому формату признаков:
+Для первого исследования используются два датасета, приведенные к единому формату колонок.
+
+Открытый датасет:
 
 ```text
 data/raw/research_1/crop_yield.csv
+```
+
+Российский датасет в формате первого исследования:
+
+```text
 data/raw/research_1/russian_crop_yield_clean.csv
 ```
 
-Оба датасета имеют одинаковые колонки:
+Ожидаемые колонки:
 
 ```text
 Region
@@ -135,7 +184,7 @@ Yield_tons_per_hectare
 
 ### Research 2
 
-Основной очищенный российский датасет:
+Основной датасет второго исследования:
 
 ```text
 data/processed/research_2/russian_final_cleaned.csv
@@ -147,79 +196,90 @@ data/processed/research_2/russian_final_cleaned.csv
 target_yield_centner_per_ha
 ```
 
-В датасет включены:
-
-- базовые признаки: регион, культура, год, площадь посева;
-- погодные признаки по месяцам с апреля по сентябрь;
-- агрегированные признаки по осадкам, температуре, влажности, сухим и жарким дням;
-- признаки по минеральным удобрениям;
-- признаки по сельскохозяйственной технике;
-- лаговые признаки урожайности за прошлые годы.
-
-Текущий очищенный датасет содержит примерно:
+В текущей версии датасет содержит:
 
 ```text
-12517 строк
+12 517 строк
 76 колонок
 8 культур
+период: 2000–2024
 ```
 
-### Research 3
-
-Используется тот же очищенный российский датасет, но признаки дополнительно фильтруются в зависимости от сценария прогноза:
+Культуры, используемые во втором исследовании:
 
 ```text
-data/processed/research_2/russian_final_cleaned.csv
+картофель
+зерновые и зернобобовые культуры
+горох
+пшеница озимая
+озимые зерновые культуры
+подсолнечник
+кукуруза на зерно
+просо
 ```
 
-Также в проекте есть подготовленный файл:
+В датасет входят следующие группы признаков:
 
-```text
-data/processed/research_3/russian_final_forecast.csv
-```
+* регион, культура и год;
+* площадь посева;
+* погодные признаки по месяцам с апреля по сентябрь;
+* агрегированные сезонные погодные признаки;
+* признаки по минеральным удобрениям;
+* признаки по сельскохозяйственной технике;
+* лаговые признаки урожайности за предыдущие годы.
+
 
 ---
 
-## 4. Модели
+## Модели
 
-В проекте реализованы нейросетевые модели для табличной регрессии с отдельными выходными головами по культурам:
+В проекте реализованы нейросетевые модели для табличной регрессии:
+
 
 ```text
 mlp_resnet
 transformer
-wide_deep
-tab_mlp
 ```
 
-Основные модели для защиты и итогового сравнения:
+### MLP-ResNet
+
+`mlp_resnet` — многоголовая MLP-модель с остаточными блоками. Общие слои извлекают признаки из табличных данных, после чего для каждой культуры используется отдельная регрессионная голова.
+
+Файл модели:
 
 ```text
-mlp_resnet
-transformer
+src/core/models/mlp_resnet_multihead.py
 ```
 
-`mlp_resnet` — остаточная MLP-модель с crop-specific heads.
+### Tabular Transformer
 
-`transformer` — табличный Transformer, где числовые признаки токенизируются и обрабатываются encoder-блоком.
+`transformer` — табличная Transformer-модель. Числовые признаки токенизируются, проходят через encoder-блоки, после чего результат передается в crop-specific heads.
 
-`wide_deep` и `tab_mlp` используются как дополнительные DL-бейзлайны во втором и третьем исследованиях.
+Файл модели:
+
+```text
+src/core/models/multihead_transformer.py
+```
 
 ---
 
-## 5. Research 1 — Transfer learning
+## Research 1 — Transfer learning
 
-Папка:
+Папка исследования:
 
 ```text
 src/research_1_transfer/
 ```
 
-Смысл исследования:
+Цель исследования — проверить, насколько обучение на большом открытом датасете переносится на российские данные.
 
-1. обучить модель на большом открытом датасете `crop_yield.csv`;
-2. проверить её на российском датасете без дообучения — zero-shot transfer;
-3. дообучить модель на российском датасете — fine-tuning;
-4. сравнить с обучением на российском датасете с нуля.
+Логика исследования:
+
+1. обучить модель на открытом датасете `crop_yield.csv`;
+2. проверить zero-shot перенос на российский датасет;
+3. выполнить fine-tuning на российских данных;
+4. обучить модель на российских данных с нуля;
+5. сравнить все варианты между собой.
 
 Поддерживаемые команды:
 
@@ -232,101 +292,51 @@ python -m src.research_1_transfer.run compare_variants
 python -m src.research_1_transfer.run all
 ```
 
-### Рекомендуемый запуск первого исследования
+Рекомендуемый полный запуск:
 
 ```bash
-python -m src.research_1_transfer.run all --models mlp_resnet transformer --feature-modes raw autoencoder
+python -m src.research_1_transfer.run all --models mlp_resnet transformer --feature-modes raw
 ```
 
-Можно добавить PCA как вспомогательный режим признаков:
-
-```bash
-python -m src.research_1_transfer.run all --models mlp_resnet transformer --feature-modes raw pca autoencoder
-```
-
-### Быстрый запуск только одной модели
-
-```bash
-python -m src.research_1_transfer.run all --models mlp_resnet --feature-modes raw
-```
-
-### Запуск по шагам
-
-Обучение на открытом датасете:
-
-```bash
-python -m src.research_1_transfer.run train_source --models mlp_resnet transformer --feature-modes raw autoencoder
-```
-
-Zero-shot перенос на российский датасет:
-
-```bash
-python -m src.research_1_transfer.run evaluate_transfer --models mlp_resnet transformer --feature-modes raw autoencoder
-```
-
-Дообучение на российском датасете:
-
-```bash
-python -m src.research_1_transfer.run finetune_on_russia --models mlp_resnet transformer --feature-modes raw autoencoder
-```
-
-Обучение на российском датасете с нуля:
-
-```bash
-python -m src.research_1_transfer.run train_russia_scratch --models mlp_resnet transformer --feature-modes raw autoencoder
-```
-
-Сбор итоговой таблицы:
-
-```bash
-python -m src.research_1_transfer.run compare_variants
-```
-
-### Результаты Research 1
-
-Основная итоговая таблица:
+Основные результаты сохраняются в папку:
 
 ```text
-results/research_1/metrics/research_1_compare_all_metrics.csv
+results/research_1/
 ```
 
-Отдельные таблицы:
+Ключевые файлы метрик:
 
 ```text
 results/research_1/metrics/source_training_metrics.csv
 results/research_1/metrics/transfer_zero_shot_metrics.csv
 results/research_1/metrics/transfer_finetuned_metrics.csv
 results/research_1/metrics/russia_scratch_metrics.csv
+results/research_1/metrics/research_1_compare_all_metrics.csv
 ```
 
-Предсказания и метрики по культурам:
-
-```text
-results/research_1/tables/
-```
-
-Сохранённые модели:
-
-```text
-results/research_1/models/
-```
 ---
 
-## 6. Research 2 — Enriched Russian dataset
+## Research 2 — Enriched Russian dataset
 
-Папка:
+Папка исследования:
 
 ```text
 src/research_2_enriched/
 ```
 
-Смысл исследования:
+Цель исследования — построить модель прогнозирования урожайности на расширенном российском датасете.
 
-- перейти от упрощённого сопоставленного датасета к полноценному российскому датасету;
-- добавить погодные признаки, удобрения, технику и лаги урожайности;
-- оценить качество моделей на временном разделении по годам.
+В отличие от первого исследования, здесь используются не только базовые признаки, но и расширенное описание аграрных условий:
 
-Разделение по годам задаётся в `src/research_2_enriched/config.py`:
+* погодные данные;
+* удобрения;
+* сельскохозяйственная техника;
+* лаговые признаки урожайности;
+* разбиение по годам.
+
+### Разбиение данных
+
+Во втором исследовании используется `year split`:
 
 ```text
 train: 2000–2016
@@ -334,230 +344,95 @@ val:   2017–2020
 test:  2021–2024
 ```
 
-Поддерживаемые команды:
+Такое разбиение ближе к реальной задаче прогнозирования, потому что модель проверяется на будущих годах, которые не использовались при обучении.
 
-```bash
-python -m src.research_2_enriched.run eda
-python -m src.research_2_enriched.run train
-python -m src.research_2_enriched.run compare
-python -m src.research_2_enriched.run tune
-python -m src.research_2_enriched.run all
-```
+### EDA
 
-### EDA и визуальный анализ
+Запуск разведочного анализа данных:
 
 ```bash
 python -m src.research_2_enriched.run eda
 ```
 
-Артефакты сохраняются в:
+После запуска сохраняются таблицы и графики:
 
 ```text
-results/research_2/figures/
-results/research_2/tables/
-```
-
-Например:
-
-```text
-research_2_missing_ratio.png
-research_2_target_distribution.png
-research_2_target_correlations.png
-research_2_corr_heatmap.png
+results/research_2/figures/research_2_missing_ratio.png
+results/research_2/figures/research_2_target_distribution.png
+results/research_2/figures/research_2_target_correlations.png
+results/research_2/figures/research_2_corr_heatmap.png
+results/research_2/tables/research_2_suspicious_rows.csv
 ```
 
 ### Обучение моделей
 
-Рекомендуемый запуск второго исследования:
+Рекомендуемый запуск основных моделей:
+
 
 ```bash
-python -m src.research_2_enriched.run train --models mlp_resnet transformer tab_mlp wide_deep --feature-modes raw --seed 52
+python -m src.research_2_enriched.run train --models mlp_resnet transformer --feature-modes raw --seed-list 42 52 62
 ```
 
-Запуск только основной модели:
+Запуск всех доступных моделей второго исследования:
 
 ```bash
-python -m src.research_2_enriched.run train --models mlp_resnet --feature-modes raw --seed 52
+python -m src.research_2_enriched.run train --models mlp_resnet transformer wide_deep tab_mlp --feature-modes raw --seed-list 42 52 62
 ```
 
-Запуск по нескольким seed:
-
-```bash
-python -m src.research_2_enriched.run train --models mlp_resnet --feature-modes raw --seed-list 42 52 62
-```
-
-Сбор сравнительной таблицы:
+Сравнение результатов:
 
 ```bash
 python -m src.research_2_enriched.run compare
 ```
 
-### Подбор гиперпараметров Optuna
 
-Для MLP-ResNet:
+### Optuna-подбор гиперпараметров
 
-```bash
-python -m src.research_2_enriched.run tune --model mlp_resnet --feature-set full --split year --trials 20
-```
+В проекте предусмотрен подбор гиперпараметров через Optuna.
 
-Для Transformer:
+Пример запуска для Transformer:
 
 ```bash
 python -m src.research_2_enriched.run tune --model transformer --feature-set full --split year --trials 20
 ```
 
-### Результаты Research 2
+Пример запуска для MLP-ResNet:
 
-Основные таблицы:
-
-```text
-results/research_2/metrics/research_2_enriched_metrics.csv
-results/research_2/metrics/research_2_enriched_metrics_by_seed.csv
-results/research_2/metrics/research_2_enriched_metrics_seed_agg.csv
-results/research_2/metrics/research_2_compare_metrics.csv
-```
-
-Предсказания и метрики по культурам:
-
-```text
-results/research_2/tables/
-```
-
-Модели и препроцессоры:
-
-```text
-results/research_2/models/
+```bash
+python -m src.research_2_enriched.run tune --model mlp_resnet --feature-set full --split year --trials 20
 ```
 
 ---
 
-## 7. Research 3 — Forecast scenarios
+## Результаты
 
-Папка:
+Все результаты экспериментов сохраняются в папку `results/`.
 
-```text
-src/research_3_forecast/
-```
-
-Смысл исследования:
-
-- превратить задачу из nowcast в forecast;
-- проверить, насколько рано можно делать прогноз урожайности;
-- сравнить сценарии с разным набором доступных признаков.
-
-Сценарии задаются в `src/research_3_forecast/config.py`.
-
-Текущие сценарии:
+Для первого исследования:
 
 ```text
-F0_full_nowcast
-F1_mid_july
-F1_mid_june
-F2_early_may
-F2_early_april
-F3_preseason_operational
-F3_preseason_strict
-F2_windows_only
+results/research_1/models/      # сохраненные модели и препроцессоры
+results/research_1/metrics/     # итоговые метрики и история обучения
+results/research_1/tables/      # предсказания и метрики по культурам
+results/research_1/figures/     # графики, если формируются
 ```
 
-Краткая логика сценариев:
-
-| Сценарий | Смысл |
-|---|---|
-| `F0_full_nowcast` | Доступны признаки за весь сезон до сентября |
-| `F1_mid_july` | Доступна погода примерно до июля |
-| `F1_mid_june` | Доступна погода примерно до июня |
-| `F2_early_may` | Ранний прогноз, погода только до мая |
-| `F2_early_april` | Очень ранний прогноз, погода только до апреля |
-| `F3_preseason_operational` | Предсезонный прогноз с частью оперативных признаков |
-| `F3_preseason_strict` | Строгий предсезонный прогноз без текущих оперативных признаков |
-| `F2_windows_only` | Прогноз на основе агрономических погодных окон |
-
-### Запуск одного сценария
-
-```bash
-python -m src.research_3_forecast.run train --scenario F0_full_nowcast --models mlp_resnet --feature-modes raw --seed 52
-```
-
-Другой пример:
-
-```bash
-python -m src.research_3_forecast.run train --scenario F2_windows_only --models mlp_resnet --feature-modes raw --seed-list 42 52 62
-```
-
-### Запуск всех сценариев
-
-PowerShell:
-
-```powershell
-$scenarios = @(
-  "F0_full_nowcast",
-  "F1_mid_july",
-  "F1_mid_june",
-  "F2_early_may",
-  "F2_early_april",
-  "F3_preseason_operational",
-  "F3_preseason_strict",
-  "F2_windows_only"
-)
-
-foreach ($s in $scenarios) {
-  python -m src.research_3_forecast.run train --scenario $s --models mlp_resnet --feature-modes raw --seed 52
-}
-```
-
-Bash:
-
-```bash
-for s in \
-  F0_full_nowcast \
-  F1_mid_july \
-  F1_mid_june \
-  F2_early_may \
-  F2_early_april \
-  F3_preseason_operational \
-  F3_preseason_strict \
-  F2_windows_only
- do
-  python -m src.research_3_forecast.run train --scenario "$s" --models mlp_resnet --feature-modes raw --seed 52
- done
-```
-
-### Результаты Research 3
-
-Для каждого сценария создаются отдельные файлы:
+Для второго исследования:
 
 ```text
-results/research_3/metrics/research_3_forecast_metrics_<scenario>.csv
-results/research_3/metrics/research_3_forecast_metrics_by_seed_<scenario>.csv
-results/research_3/metrics/research_3_forecast_metrics_seed_agg_<scenario>.csv
-```
-
-Примеры:
-
-```text
-results/research_3/metrics/research_3_forecast_metrics_F0_full_nowcast.csv
-results/research_3/metrics/research_3_forecast_metrics_F2_windows_only.csv
-results/research_3/metrics/research_3_forecast_metrics_seed_agg_F2_windows_only.csv
-```
-
-Предсказания и метрики по культурам:
-
-```text
-results/research_3/tables/
-```
-
-Модели:
-
-```text
-results/research_3/models/
+results/research_2/models/      # сохраненные модели и препроцессоры
+results/research_2/metrics/     # итоговые метрики и история обучения
+results/research_2/tables/      # предсказания и метрики по культурам
+results/research_2/figures/     # EDA-графики
 ```
 
 ---
 
-## 8. Метрики
+## Метрики
 
-Во всех исследованиях используются регрессионные метрики:
+В проекте рассчитываются абсолютные и нормализованные метрики качества.
+
+Абсолютные метрики:
 
 ```text
 MAE
@@ -566,121 +441,22 @@ RMSE
 R2
 ```
 
-Интерпретация:
-
-- `MAE` — средняя абсолютная ошибка прогноза;
-- `MSE` — среднеквадратичная ошибка;
-- `RMSE` — корень из MSE, ошибка в единицах целевой переменной;
-- `R2` — доля объяснённой дисперсии, чем ближе к 1, тем лучше.
-
-Единицы измерения зависят от исследования:
+Нормализованные метрики:
 
 ```text
-Research 1: Yield_tons_per_hectare
-Research 2–3: target_yield_centner_per_ha
+NMAE, %
+NRMSE, %
+NMAPE, %
 ```
+
+Метрики рассчитываются:
+
+1. по всей тестовой выборке;
+2. отдельно по каждой культуре;
+3. отдельно по каждому seed при серии запусков;
+4. в агрегированном виде по нескольким seed.
+
+Метрики по культурам важны для анализа многоголовой архитектуры, потому что каждая культура имеет собственную выходную голову.
 
 ---
 
-## 9. Где смотреть итоговые результаты
-
-### Для презентации первого исследования
-
-```text
-results/research_1/metrics/research_1_compare_all_metrics.csv
-```
-
-Эта таблица нужна для сравнения:
-
-- обучение на открытом датасете;
-- zero-shot перенос на российский датасет;
-- fine-tuning на российском датасете;
-- обучение на российском датасете с нуля.
-
-### Для презентации второго исследования
-
-```text
-results/research_2/metrics/research_2_enriched_metrics.csv
-results/research_2/metrics/research_2_enriched_metrics_seed_agg.csv
-```
-
-Эти таблицы показывают качество моделей на расширенном российском датасете.
-
-### Для презентации третьего исследования
-
-```text
-results/research_3/metrics/research_3_forecast_metrics_*.csv
-```
-
-Эти таблицы показывают качество прогнозирования при разной заблаговременности.
-
----
-
-## 10. Типовой порядок запуска всего проекта
-
-Если нужно воспроизвести весь пайплайн с нуля, порядок такой:
-
-```bash
-python -m src.research_1_transfer.run all --models mlp_resnet transformer --feature-modes raw autoencoder
-```
-
-```bash
-python -m src.research_2_enriched.run eda
-```
-
-```bash
-python -m src.research_2_enriched.run train --models mlp_resnet transformer tab_mlp wide_deep --feature-modes raw --seed 52
-```
-
-```bash
-python -m src.research_2_enriched.run compare
-```
-
-```bash
-python -m src.research_3_forecast.run train --scenario F0_full_nowcast --models mlp_resnet --feature-modes raw --seed 52
-```
-
-```bash
-python -m src.research_3_forecast.run train --scenario F1_mid_july --models mlp_resnet --feature-modes raw --seed 52
-```
-
-```bash
-python -m src.research_3_forecast.run train --scenario F1_mid_june --models mlp_resnet --feature-modes raw --seed 52
-```
-
-```bash
-python -m src.research_3_forecast.run train --scenario F2_early_may --models mlp_resnet --feature-modes raw --seed 52
-```
-
-```bash
-python -m src.research_3_forecast.run train --scenario F2_early_april --models mlp_resnet --feature-modes raw --seed 52
-```
-
-```bash
-python -m src.research_3_forecast.run train --scenario F3_preseason_operational --models mlp_resnet --feature-modes raw --seed 52
-```
-
-```bash
-python -m src.research_3_forecast.run train --scenario F3_preseason_strict --models mlp_resnet --feature-modes raw --seed 52
-```
-
-```bash
-python -m src.research_3_forecast.run train --scenario F2_windows_only --models mlp_resnet --feature-modes raw --seed-list 42 52 62
-```
-
----
-
-
-## 11. Краткое описание исследовательской логики
-
-### Research 1
-
-Проверяется возможность переноса знаний с большого открытого датасета на российские данные. Главный вывод строится на сравнении zero-shot и fine-tuning: если zero-shot работает плохо, а fine-tuning улучшает качество, значит простого переноса недостаточно, но предварительное обучение может быть полезным после адаптации к российскому распределению данных.
-
-### Research 2
-
-Проверяется, насколько расширение российского датасета погодой, удобрениями, техникой и историческими лагами урожайности повышает качество прогноза. Основное разделение делается по годам, чтобы эксперимент был ближе к реальной задаче прогнозирования будущих сезонов.
-
-### Research 3
-
-Проверяется, как меняется качество прогноза при уменьшении объёма доступной информации о текущем сезоне. Это позволяет определить компромисс между качеством и заблаговременностью прогноза.
