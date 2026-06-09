@@ -24,8 +24,6 @@
 * [Research 2 — Enriched Russian dataset](#research-2--enriched-russian-dataset)
 * [Результаты](#результаты)
 * [Метрики](#метрики)
-* [Работа с GitHub](#работа-с-github)
-
 ---
 
 ## Описание проекта
